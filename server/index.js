@@ -52,8 +52,23 @@ const wss = new WebSocketServer({ server });
 const players = new Map();
 
 async function healthCheck(response) {
-  await db.query('SELECT 1');
-  sendJson(response, 200, { ok: true });
+  try {
+    await db.query('SELECT 1');
+    sendJson(response, 200, { ok: true });
+  } catch (error) {
+    console.error('Database health check failed:', {
+      code: error.code,
+      errno: error.errno,
+      sqlState: error.sqlState,
+      message: error.message,
+    });
+
+    sendJson(response, 500, {
+      ok: false,
+      error: 'Nao foi possivel conectar ao banco de dados.',
+      code: error.code || 'UNKNOWN',
+    });
+  }
 }
 
 async function register(request, response) {
