@@ -90,7 +90,7 @@ const LEGACY_DIRECTIONS = {
   down: 'south',
   left: 'west',
 };
-const characterSprites = Object.fromEntries(
+const fallbackCharacterSprites = Object.fromEntries(
   Object.entries(CHARACTER_SPRITE_SOURCES).map(([direction, source]) => {
     const image = new Image();
     image.src = source;
@@ -98,6 +98,7 @@ const characterSprites = Object.fromEntries(
   }),
 );
 const backgroundImages = new Map();
+const raceSpriteSets = new Map();
 let lastSentDirection = { dx: 0, dy: 0 };
 let world = { ...DEFAULT_WORLD };
 let camera = { x: 0, y: 0 };
@@ -187,6 +188,7 @@ function applyStateMessage(message) {
   players.clear();
 
   for (const player of message.players) {
+    preloadRaceSpriteSet(player.race);
     players.set(player.id, player);
   }
 }
@@ -532,9 +534,118 @@ function getCharacterSize(player) {
 
 function getCharacterSprite(player) {
   const direction = LEGACY_DIRECTIONS[player.direction] || player.direction || DEFAULT_CHARACTER_DIRECTION;
-  const sprite = characterSprites[direction] || characterSprites[DEFAULT_CHARACTER_DIRECTION];
+  const raceSpriteSet = getRaceSpriteSet(player.race);
+  const sprite = getAnimatedRaceSprite(raceSpriteSet, player, direction)
+    || getIdleRaceSprite(raceSpriteSet, direction)
+    || fallbackCharacterSprites[direction]
+    || fallbackCharacterSprites[DEFAULT_CHARACTER_DIRECTION];
 
   return sprite && sprite.complete && sprite.naturalWidth > 0 ? sprite : null;
+}
+
+function preloadRaceSpriteSet(race) {
+  if (!race?.spriteManifestPath || raceSpriteSets.has(race.spriteManifestPath)) {
+    return;
+  }
+
+  const spriteSet = {
+    status: 'loading',
+    basePath: race.spriteBasePath || race.spriteManifestPath.split('/').slice(0, -1).join('/'),
+    idleAnimationKey: race.idleAnimationKey || 'idle',
+    walkAnimationKey: race.walkAnimationKey || null,
+    rotations: {},
+    animations: {},
+  };
+
+  raceSpriteSets.set(race.spriteManifestPath, spriteSet);
+
+  fetch(`${race.spriteManifestPath}?v=${encodeURIComponent(race.walkAnimationKey || '')}`, { cache: 'force-cache' })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((metadata) => {
+      if (!metadata) {
+        spriteSet.status = 'error';
+        return;
+      }
+
+      hydrateRaceSpriteSet(spriteSet, metadata);
+      spriteSet.status = 'ready';
+    })
+    .catch(() => {
+      spriteSet.status = 'error';
+    });
+}
+
+function hydrateRaceSpriteSet(spriteSet, metadata) {
+  const frames = metadata.states?.[0]?.frames || {};
+  const rotations = frames.rotations || {};
+
+  for (const [direction, source] of Object.entries(rotations)) {
+    spriteSet.rotations[direction] = createSpriteImage(resolveRaceAssetPath(spriteSet.basePath, source));
+  }
+
+  for (const [animationKey, directions] of Object.entries(frames.animations || {})) {
+    spriteSet.animations[animationKey] = {};
+
+    for (const [direction, sources] of Object.entries(directions || {})) {
+      spriteSet.animations[animationKey][direction] = sources.map((source) => (
+        createSpriteImage(resolveRaceAssetPath(spriteSet.basePath, source))
+      ));
+    }
+  }
+
+  if (!spriteSet.walkAnimationKey) {
+    spriteSet.walkAnimationKey = Object.keys(spriteSet.animations)[0] || null;
+  }
+}
+
+function getRaceSpriteSet(race) {
+  if (!race?.spriteManifestPath) {
+    return null;
+  }
+
+  const spriteSet = raceSpriteSets.get(race.spriteManifestPath);
+  return spriteSet?.status === 'ready' ? spriteSet : null;
+}
+
+function getAnimatedRaceSprite(spriteSet, player, direction) {
+  if (!spriteSet || !player.isMoving || !spriteSet.walkAnimationKey) {
+    return null;
+  }
+
+  const frames = spriteSet.animations[spriteSet.walkAnimationKey]?.[direction]
+    || spriteSet.animations[spriteSet.walkAnimationKey]?.[DEFAULT_CHARACTER_DIRECTION];
+
+  if (!frames?.length) {
+    return null;
+  }
+
+  return frames[Math.floor(performance.now() / 120) % frames.length];
+}
+
+function getIdleRaceSprite(spriteSet, direction) {
+  if (!spriteSet) {
+    return null;
+  }
+
+  return spriteSet.rotations[direction] || spriteSet.rotations[DEFAULT_CHARACTER_DIRECTION] || null;
+}
+
+function createSpriteImage(source) {
+  const image = new Image();
+  image.src = source;
+  return image;
+}
+
+function resolveRaceAssetPath(basePath, source) {
+  if (!source) {
+    return '';
+  }
+
+  if (source.startsWith('/')) {
+    return source;
+  }
+
+  return `${basePath.replace(/\/$/, '')}/${source.replace(/^\//, '')}`;
 }
 
 function renderFallbackCharacter(x, y) {

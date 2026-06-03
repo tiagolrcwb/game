@@ -24,6 +24,7 @@ const editorZoomOutButton = document.querySelector('[data-editor-zoom-out]');
 const editorBackgroundInput = document.querySelector('[data-editor-background]');
 const cellParamLevelSelect = document.querySelector('[data-cell-param-level]');
 const backgroundPreview = document.querySelector('[data-background-preview]');
+const raceSpritePackageInput = document.querySelector('[data-race-sprite-package]');
 const teleportForm = document.querySelector('[data-teleport-form]');
 const teleportTargetSelect = document.querySelector('[data-teleport-target]');
 const teleportList = document.querySelector('[data-teleport-list]');
@@ -141,6 +142,12 @@ mapForm.addEventListener('submit', async (event) => {
 for (const form of taxonomyForms) {
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+
+    if (form.dataset.taxonomyForm === 'races') {
+      await saveRaceForm(form);
+      return;
+    }
+
     await save(`/api/manager/${form.dataset.taxonomyForm}`, 'POST', formToObject(form));
     form.reset();
     form.elements.id.value = '';
@@ -461,6 +468,7 @@ function renderTaxonomy(type) {
     button.innerHTML = `
       <strong>${escapeHtml(item.name)}</strong>
       <small>${item.isActive ? 'Ativa' : 'Inativa'}</small>
+      ${type === 'races' ? `<small>${item.spriteManifestPath ? 'Sprites importados' : 'Sem sprites'}</small>` : ''}
       <span>${escapeHtml(item.description || '')}</span>
     `;
     button.addEventListener('click', () => {
@@ -468,9 +476,74 @@ function renderTaxonomy(type) {
       form.elements.name.value = item.name;
       form.elements.description.value = item.description || '';
       form.elements.isActive.value = String(item.isActive);
+      if (form.elements.spritePackage) {
+        form.elements.spritePackage.value = '';
+      }
     });
     list.append(button);
   }
+}
+
+async function saveRaceForm(form) {
+  const payload = formToObject(form);
+  delete payload.spritePackage;
+  setStatus('Salvando raca...');
+
+  const response = await fetch('/api/manager/races', {
+    method: 'POST',
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    setStatus(data.error || 'Nao foi possivel salvar a raca.');
+    return;
+  }
+
+  state = data;
+  renderState();
+
+  const raceId = data.savedId || Number(payload.id || 0);
+  const file = raceSpritePackageInput?.files?.[0] || null;
+
+  if (file && raceId) {
+    await uploadRaceSpritePackage(raceId, file);
+  } else {
+    setStatus('Raca salva.');
+  }
+
+  form.reset();
+  form.elements.id.value = '';
+}
+
+async function uploadRaceSpritePackage(raceId, file) {
+  setStatus('Importando sprites da raca...');
+  const dataUrl = await fileToDataUrl(file);
+  const response = await fetch('/api/manager/races/sprites', {
+    method: 'POST',
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      raceId,
+      dataUrl,
+    }),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    setStatus(data.error || 'Nao foi possivel importar os sprites.');
+    return;
+  }
+
+  state = data;
+  renderState();
+  setStatus('Sprites importados.');
 }
 
 function fillMapForm(map) {

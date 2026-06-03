@@ -5,14 +5,15 @@ const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
+const AdmZip = require('adm-zip');
 const { WebSocket, WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8080;
 const PLAYER_SIZE = 24;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
-const MAX_REQUEST_BODY_SIZE = 12 * 1024 * 1024;
-const APP_VERSION = '2026-06-03-cell-brush-2';
+const MAX_REQUEST_BODY_SIZE = 48 * 1024 * 1024;
+const APP_VERSION = '2026-06-03-race-sprites-1';
 const SPEED_LEVEL_MULTIPLIERS = {
   1: 0.5,
   2: 0.75,
@@ -25,10 +26,20 @@ const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
 const MAP_ASSETS_DIR = path.join(CLIENT_DIR, 'assets', 'maps');
 const MAP_DATA_DIR = path.join(MAP_ASSETS_DIR, 'data');
 const MAP_BACKGROUND_DIR = path.join(MAP_ASSETS_DIR, 'backgrounds');
+const RACE_ASSETS_DIR = path.join(CLIENT_DIR, 'assets', 'races');
+const DEFAULT_RACE = {
+  id: null,
+  name: 'Humano',
+  spriteManifestPath: '/assets/6a199e83-bb2e-43a6-80d6-0548eede75a2/metadata.json',
+  spriteBasePath: '/assets/6a199e83-bb2e-43a6-80d6-0548eede75a2',
+  idleAnimationKey: 'idle',
+  walkAnimationKey: 'animation-ca9dec37',
+};
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const MANAGER_TOKEN = process.env.MANAGER_TOKEN || '';
 const DEFAULT_GAME_CONFIG = {
   gameName: 'Vigilia dos Portoes',
+  defaultRace: DEFAULT_RACE,
   map: {
     id: 1,
     name: 'Mapa Inicial',
@@ -261,10 +272,22 @@ async function handleManagerRequest(request, response) {
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/manager/races/sprites') {
+    const body = await readRequestBody(request);
+    const raceId = toPositiveInt(body.raceId, 'Raca invalida.');
+    await saveRaceSpritePackage(raceId, String(body.dataUrl || ''));
+    await reloadGameConfig();
+    refreshPlayersDefaultRace();
+    await broadcastGameState();
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/manager/races') {
     const body = await readRequestBody(request);
-    await saveTaxonomy('races', body);
-    sendJson(response, 200, await getManagerState());
+    const savedId = await saveTaxonomy('races', body);
+    const managerState = await getManagerState();
+    sendJson(response, 200, { ...managerState, savedId });
     return;
   }
 
@@ -308,7 +331,7 @@ async function getManagerState() {
     'SELECT * FROM maps ORDER BY id',
   );
   const [raceRows] = await db.execute(
-    'SELECT id, name, description, is_active FROM races ORDER BY name',
+    'SELECT * FROM races ORDER BY name',
   );
   const [classRows] = await db.execute(
     'SELECT id, name, description, is_active FROM character_classes ORDER BY name',
@@ -581,6 +604,10 @@ function ensureMapAssetDirectories() {
   for (const directory of [MAP_DATA_DIR, MAP_BACKGROUND_DIR]) {
     fs.mkdirSync(directory, { recursive: true });
   }
+}
+
+function ensureRaceAssetDirectories() {
+  fs.mkdirSync(RACE_ASSETS_DIR, { recursive: true });
 }
 
 function getMapDataPublicPath(mapId) {
@@ -861,6 +888,113 @@ async function saveMapBackground(mapId, dataUrl) {
   return `/assets/maps/backgrounds/${fileName}`;
 }
 
+async function saveRaceSpritePackage(raceId, dataUrl) {
+  ensureRaceAssetDirectories();
+  await ensureRaceExists(raceId);
+
+  const content = parseZipDataUrl(dataUrl);
+  const zip = new AdmZip(content);
+  const entries = zip.getEntries();
+  const metadataEntry = entries.find((entry) => (
+    !entry.isDirectory && entry.entryName.replaceAll('\\', '/').endsWith('metadata.json')
+  ));
+
+  if (!metadataEntry) {
+    throw Object.assign(new Error('Pacote invalido. O ZIP precisa conter metadata.json.'), { statusCode: 400 });
+  }
+
+  const metadata = JSON.parse(metadataEntry.getData().toString('utf8'));
+  const animations = metadata.states?.[0]?.frames?.animations || {};
+  const walkAnimationKey = Object.keys(animations)[0] || null;
+  const packageName = `race-${raceId}-${crypto.randomUUID()}`;
+  const targetDir = path.join(RACE_ASSETS_DIR, packageName);
+
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  for (const entry of entries) {
+    if (entry.isDirectory) {
+      continue;
+    }
+
+    const relativePath = normalizeZipEntryPath(entry.entryName);
+    const extension = path.extname(relativePath).toLowerCase();
+
+    if (!['.png', '.json'].includes(extension)) {
+      continue;
+    }
+
+    const outputPath = path.resolve(targetDir, relativePath);
+
+    if (!outputPath.startsWith(`${targetDir}${path.sep}`)) {
+      throw Object.assign(new Error('Pacote invalido. Caminho de arquivo inseguro.'), { statusCode: 400 });
+    }
+
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, entry.getData());
+  }
+
+  const manifestRelativePath = normalizeZipEntryPath(metadataEntry.entryName);
+  const spriteBasePath = `/assets/races/${packageName}`;
+  const spriteManifestPath = `${spriteBasePath}/${manifestRelativePath}`;
+  const [oldRows] = await db.execute('SELECT sprite_base_path FROM races WHERE id = ? LIMIT 1', [raceId]);
+
+  await db.execute(
+    `UPDATE races
+      SET sprite_manifest_path = ?, sprite_base_path = ?, idle_animation_key = ?, walk_animation_key = ?
+      WHERE id = ?`,
+    [spriteManifestPath, spriteBasePath, 'idle', walkAnimationKey, raceId],
+  );
+
+  deleteRaceAssetFolder(oldRows[0]?.sprite_base_path, spriteBasePath);
+}
+
+function parseZipDataUrl(dataUrl) {
+  const match = dataUrl.match(/^data:(application\/zip|application\/x-zip-compressed|application\/octet-stream);base64,([a-zA-Z0-9+/=]+)$/);
+
+  if (!match) {
+    throw Object.assign(new Error('Arquivo invalido. Use um ZIP exportado pelo PixelLab.'), { statusCode: 400 });
+  }
+
+  const content = Buffer.from(match[2], 'base64');
+
+  if (content.length > 30 * 1024 * 1024) {
+    throw Object.assign(new Error('ZIP muito grande. Limite de 30 MB.'), { statusCode: 400 });
+  }
+
+  return content;
+}
+
+function normalizeZipEntryPath(entryName) {
+  const relativePath = entryName.replaceAll('\\', '/').split('/').filter(Boolean).join('/');
+
+  if (!relativePath || relativePath.startsWith('/') || relativePath.split('/').includes('..')) {
+    throw Object.assign(new Error('Pacote invalido. Caminho de arquivo inseguro.'), { statusCode: 400 });
+  }
+
+  return relativePath;
+}
+
+async function ensureRaceExists(raceId) {
+  const [rows] = await db.execute('SELECT id FROM races WHERE id = ? LIMIT 1', [raceId]);
+
+  if (!rows[0]) {
+    throw Object.assign(new Error('Raca nao encontrada.'), { statusCode: 404 });
+  }
+}
+
+function deleteRaceAssetFolder(oldBasePath, currentBasePath) {
+  if (!oldBasePath || oldBasePath === currentBasePath || !oldBasePath.startsWith('/assets/races/')) {
+    return;
+  }
+
+  const folderName = oldBasePath.slice('/assets/races/'.length);
+  const oldPath = path.resolve(RACE_ASSETS_DIR, folderName);
+
+  if (oldPath.startsWith(`${RACE_ASSETS_DIR}${path.sep}`) && fs.existsSync(oldPath)) {
+    fs.rmSync(oldPath, { recursive: true, force: true });
+  }
+}
+
 async function saveTaxonomy(table, body) {
   if (!['races', 'character_classes'].includes(table)) {
     throw new Error('Invalid taxonomy table.');
@@ -876,15 +1010,22 @@ async function saveTaxonomy(table, body) {
       `UPDATE ${table} SET name = ?, description = ?, is_active = ? WHERE id = ?`,
       [name, description, isActive, id],
     );
-    return;
+    return id;
   }
 
-  await db.execute(
+  const [result] = await db.execute(
     `INSERT INTO ${table} (name, description, is_active)
       VALUES (?, ?, ?)
       ON DUPLICATE KEY UPDATE description = VALUES(description), is_active = VALUES(is_active)`,
     [name, description, isActive],
   );
+
+  if (result.insertId) {
+    return Number(result.insertId);
+  }
+
+  const [rows] = await db.execute(`SELECT id FROM ${table} WHERE name = ? LIMIT 1`, [name]);
+  return Number(rows[0]?.id || 0);
 }
 
 function mapMapRow(row) {
@@ -918,6 +1059,10 @@ function mapTaxonomyRow(row) {
     id: row.id,
     name: row.name,
     description: row.description || '',
+    spriteManifestPath: row.sprite_manifest_path || null,
+    spriteBasePath: row.sprite_base_path || null,
+    idleAnimationKey: row.idle_animation_key || 'idle',
+    walkAnimationKey: row.walk_animation_key || null,
     isActive: Boolean(row.is_active),
   };
 }
@@ -943,13 +1088,17 @@ async function reloadGameConfig() {
     );
 
     if (!rows[0]) {
-      gameConfig = DEFAULT_GAME_CONFIG;
+      gameConfig = {
+        ...DEFAULT_GAME_CONFIG,
+        defaultRace: await getDefaultRace(),
+      };
       mapsById.set(DEFAULT_GAME_CONFIG.map.id, DEFAULT_GAME_CONFIG.map);
       return;
     }
 
     gameConfig = {
       gameName: rows[0].game_name,
+      defaultRace: await getDefaultRace(),
       map: mapMapRow(rows[0]),
     };
   } catch (error) {
@@ -958,6 +1107,30 @@ async function reloadGameConfig() {
     mapsById.clear();
     mapsById.set(DEFAULT_GAME_CONFIG.map.id, DEFAULT_GAME_CONFIG.map);
   }
+}
+
+async function getDefaultRace() {
+  const [rows] = await db.execute(
+    `SELECT id, name, description, sprite_manifest_path, sprite_base_path,
+      idle_animation_key, walk_animation_key, is_active
+      FROM races
+      WHERE name = ? AND is_active = 1
+      LIMIT 1`,
+    [DEFAULT_RACE.name],
+  );
+
+  return rows[0] ? mapRaceForPlayer(mapTaxonomyRow(rows[0])) : DEFAULT_RACE;
+}
+
+function mapRaceForPlayer(race) {
+  return {
+    id: race.id || null,
+    name: race.name || DEFAULT_RACE.name,
+    spriteManifestPath: race.spriteManifestPath || DEFAULT_RACE.spriteManifestPath,
+    spriteBasePath: race.spriteBasePath || DEFAULT_RACE.spriteBasePath,
+    idleAnimationKey: race.idleAnimationKey || DEFAULT_RACE.idleAnimationKey,
+    walkAnimationKey: race.walkAnimationKey || DEFAULT_RACE.walkAnimationKey,
+  };
 }
 
 function getMapForPlayer(player) {
@@ -1230,6 +1403,7 @@ function createPlayer(id, user) {
     y: spawn.y,
     direction: 'south',
     isMoving: false,
+    race: mapRaceForPlayer(gameConfig.defaultRace || DEFAULT_RACE),
     disconnectedAt: null,
     removalTimer: null,
   };
@@ -1243,6 +1417,7 @@ function getOrCreatePlayer(socketId, user) {
     existing.removalTimer = null;
     existing.disconnectedAt = null;
     existing.id = socketId;
+    existing.race = existing.race || mapRaceForPlayer(gameConfig.defaultRace || DEFAULT_RACE);
     players.set(socketId, existing);
     return existing;
   }
@@ -1251,6 +1426,14 @@ function getOrCreatePlayer(socketId, user) {
   playersByUserId.set(user.id, player);
   players.set(socketId, player);
   return player;
+}
+
+function refreshPlayersDefaultRace() {
+  const race = mapRaceForPlayer(gameConfig.defaultRace || DEFAULT_RACE);
+
+  for (const player of playersByUserId.values()) {
+    player.race = race;
+  }
 }
 
 function resetPlayersToDefaultMapEntry() {
