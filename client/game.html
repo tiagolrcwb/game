@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jogo - Vig&iacute;lia dos Port&otilde;es</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background:
+          radial-gradient(circle at center, rgba(80, 70, 60, 0.14), transparent 45%),
+          linear-gradient(135deg, #08090d 0%, #11131a 55%, #050608 100%);
+        color: #d8d0bd;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      .game-shell {
+        width: min(1180px, calc(100vw - 32px));
+        padding: 18px;
+        border: 1px solid #2f2a25;
+        background: rgba(8, 9, 13, 0.82);
+        box-shadow: 0 0 40px rgba(0, 0, 0, 0.75);
+      }
+
+      .game-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: #b98b57;
+      }
+
+      .user-area {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #b9ad9a;
+        font-size: 14px;
+      }
+
+      button {
+        border: 1px solid #3b332b;
+        background: #171820;
+        color: #e3dac8;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+
+      canvas {
+        width: 100%;
+        max-width: 1140px;
+        aspect-ratio: 19 / 10;
+        display: block;
+        border: 2px solid #3b332b;
+        background: #111217;
+        image-rendering: pixelated;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="game-shell">
+      <header class="game-header">
+        <h1>Vig&iacute;lia dos Port&otilde;es</h1>
+        <div class="user-area">
+          <span data-username></span>
+          <button type="button" data-logout>Sair</button>
+        </div>
+      </header>
+
+      <canvas id="gameCanvas" width="1140" height="600"></canvas>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
