@@ -13,6 +13,13 @@ const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 12 * 1024 * 1024;
 const APP_VERSION = '2026-06-03-cell-params-1';
+const SPEED_LEVEL_MULTIPLIERS = {
+  1: 0.5,
+  2: 0.75,
+  3: 1,
+  4: 1.25,
+  5: 1.5,
+};
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
 const MAP_ASSETS_DIR = path.join(CLIENT_DIR, 'assets', 'maps');
@@ -695,6 +702,7 @@ function normalizeSpeedCell(cell, map) {
   const column = Number(cell?.column);
   const row = Number(cell?.row);
   const multiplier = Number(cell?.multiplier);
+  const level = clamp(Number(cell?.level || getSpeedLevelFromMultiplier(multiplier)), 1, 5);
 
   if (
     !Number.isInteger(column) ||
@@ -708,8 +716,18 @@ function normalizeSpeedCell(cell, map) {
     id: String(cell.id || crypto.randomUUID()),
     column,
     row,
-    multiplier: clamp(Number.isFinite(multiplier) ? multiplier : 1, 0.2, 3),
+    level,
+    multiplier: SPEED_LEVEL_MULTIPLIERS[level] || 1,
   };
+}
+
+function getSpeedLevelFromMultiplier(multiplier) {
+  if (!Number.isFinite(multiplier)) return 3;
+  if (multiplier <= 0.625) return 1;
+  if (multiplier <= 0.875) return 2;
+  if (multiplier <= 1.125) return 3;
+  if (multiplier <= 1.375) return 4;
+  return 5;
 }
 
 function normalizeLevelCells(data, map) {

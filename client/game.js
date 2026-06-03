@@ -40,6 +40,13 @@ const PLAYER_ARMOR_COLOR = '#8f8270';
 const PLAYER_OUTLINE_COLOR = '#1b1110';
 const PLAYER_STEEL_COLOR = '#c3c7bf';
 const DEFAULT_CHARACTER_DIRECTION = 'south';
+const CELL_LEVEL_SCALES = {
+  1: 0.8,
+  2: 0.9,
+  3: 1,
+  4: 1.1,
+  5: 1.2,
+};
 const DEFAULT_WORLD = {
   width: 32000,
   height: 32000,
@@ -510,7 +517,7 @@ function getCharacterSize(player) {
   const row = clamp(Math.floor(((player.worldY ?? player.y) + PLAYER_SIZE / 2) / world.cellSize) + 1, 1, world.heightCells);
   const cell = world.levelCells.find((item) => item.column === column && item.row === row);
   const level = clamp(Number(cell?.level || 3), 1, 5);
-  const scale = [0.8, 0.9, 1, 1.1, 1.2][level - 1] || 1;
+  const scale = CELL_LEVEL_SCALES[level] || 1;
 
   return Math.round(world.characterSize * scale);
 }

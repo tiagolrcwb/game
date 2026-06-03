@@ -22,6 +22,7 @@ const editorSaveButton = document.querySelector('[data-editor-save]');
 const editorZoomInButton = document.querySelector('[data-editor-zoom-in]');
 const editorZoomOutButton = document.querySelector('[data-editor-zoom-out]');
 const editorBackgroundInput = document.querySelector('[data-editor-background]');
+const cellParamLevelSelect = document.querySelector('[data-cell-param-level]');
 const backgroundPreview = document.querySelector('[data-background-preview]');
 const teleportForm = document.querySelector('[data-teleport-form]');
 const teleportTargetSelect = document.querySelector('[data-teleport-target]');
@@ -30,10 +31,14 @@ const newMapButton = document.querySelector('[data-new-map]');
 const deleteMapButton = document.querySelector('[data-delete-map]');
 const mapTabButtons = document.querySelectorAll('[data-map-tab]');
 const mapTabPanels = document.querySelectorAll('[data-map-tab-panel]');
-const speedCellForm = document.querySelector('[data-speed-cell-form]');
-const speedCellList = document.querySelector('[data-speed-cell-list]');
-const levelCellForm = document.querySelector('[data-level-cell-form]');
-const levelCellList = document.querySelector('[data-level-cell-list]');
+
+const SPEED_LEVEL_MULTIPLIERS = {
+  1: 0.5,
+  2: 0.75,
+  3: 1,
+  4: 1.25,
+  5: 1.5,
+};
 
 let managerToken = localStorage.getItem('managerToken') || '';
 let state = {
@@ -157,16 +162,6 @@ for (const button of editorModeButtons) {
 teleportForm.addEventListener('submit', (event) => {
   event.preventDefault();
   upsertTeleportPoint(formToObject(teleportForm));
-});
-
-speedCellForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  upsertSpeedCell(formToObject(speedCellForm));
-});
-
-levelCellForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  upsertLevelCell(formToObject(levelCellForm));
 });
 
 editorCanvas.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -332,7 +327,7 @@ function setMapTab(tab) {
     panel.classList.toggle('active', panel.dataset.mapTabPanel === tab);
   }
 
-  if (['editor', 'speed', 'levels'].includes(tab)) {
+  if (tab === 'editor') {
     renderEditor();
   }
 }
@@ -555,10 +550,6 @@ async function loadMapEditor(mapId) {
   preloadEditorBackground();
   renderTeleportFormDefaults();
   renderTeleportList();
-  renderSpeedCellFormDefaults();
-  renderSpeedCellList();
-  renderLevelCellFormDefaults();
-  renderLevelCellList();
   renderEditor();
   setStatus('Editor carregado.');
 }
@@ -589,8 +580,6 @@ async function saveMapEditor() {
 
   editor.data = normalizeClientMapData(data.data, editor.map);
   renderTeleportList();
-  renderSpeedCellList();
-  renderLevelCellList();
   renderEditor();
   setStatus('Editor salvo.');
 }
@@ -711,12 +700,12 @@ function beginEditorDrag(event) {
   }
 
   if (editor.mode === 'speed') {
-    fillSpeedCell(cell);
+    applySpeedCell(cell);
     return;
   }
 
   if (editor.mode === 'level') {
-    fillLevelCell(cell);
+    applyLevelCell(cell);
   }
 }
 
@@ -896,230 +885,50 @@ function renderTeleportList() {
   }
 }
 
-function upsertSpeedCell(values) {
-  if (!editor.map) {
-    return;
+function applySpeedCell(cell) {
+  const level = getSelectedCellParamLevel();
+  const multiplier = SPEED_LEVEL_MULTIPLIERS[level] || 1;
+
+  editor.data.speedCells = editor.data.speedCells.filter((item) => (
+    item.column !== cell.column || item.row !== cell.row
+  ));
+
+  if (level !== 3) {
+    editor.data.speedCells.push({
+      id: cryptoRandomId(),
+      column: cell.column,
+      row: cell.row,
+      level,
+      multiplier,
+    });
   }
 
-  const cell = {
-    id: values.id || cryptoRandomId(),
-    column: Number(values.column),
-    row: Number(values.row),
-    multiplier: Number(values.multiplier),
-  };
-
-  if (!isCellInsideMap(cell.column, cell.row, editor.map)) {
-    setStatus('Celula de velocidade fora do mapa.');
-    return;
-  }
-
-  cell.multiplier = clamp(Number.isFinite(cell.multiplier) ? cell.multiplier : 1, 0.2, 3);
-
-  const index = editor.data.speedCells.findIndex((item) => item.id === cell.id);
-
-  if (index >= 0) {
-    editor.data.speedCells[index] = cell;
-  } else {
-    const existingIndex = editor.data.speedCells.findIndex((item) => (
-      item.column === cell.column && item.row === cell.row
-    ));
-
-    if (existingIndex >= 0) {
-      editor.data.speedCells[existingIndex] = cell;
-    } else {
-      editor.data.speedCells.push(cell);
-    }
-  }
-
-  speedCellForm.reset();
-  renderSpeedCellFormDefaults();
-  renderSpeedCellList();
   renderEditor();
-  setStatus('Velocidade da celula pronta para salvar.');
+  setStatus(level === 3 ? 'Velocidade da celula voltou ao padrao.' : `Velocidade N${level} aplicada na celula.`);
 }
 
-function removeSpeedCell(id) {
-  editor.data.speedCells = editor.data.speedCells.filter((cell) => cell.id !== id);
-  renderSpeedCellList();
+function applyLevelCell(cell) {
+  const level = getSelectedCellParamLevel();
+
+  editor.data.levelCells = editor.data.levelCells.filter((item) => (
+    item.column !== cell.column || item.row !== cell.row
+  ));
+
+  if (level !== 3) {
+    editor.data.levelCells.push({
+      id: cryptoRandomId(),
+      column: cell.column,
+      row: cell.row,
+      level,
+    });
+  }
+
   renderEditor();
+  setStatus(level === 3 ? 'Escala da celula voltou ao padrao.' : `Nivel N${level} aplicado na celula.`);
 }
 
-function editSpeedCell(cell) {
-  speedCellForm.elements.id.value = cell.id;
-  speedCellForm.elements.column.value = cell.column;
-  speedCellForm.elements.row.value = cell.row;
-  speedCellForm.elements.multiplier.value = cell.multiplier;
-}
-
-function fillSpeedCell(cell) {
-  const existing = editor.data.speedCells.find((item) => item.column === cell.column && item.row === cell.row);
-
-  if (existing) {
-    editSpeedCell(existing);
-    return;
-  }
-
-  speedCellForm.elements.id.value = '';
-  speedCellForm.elements.column.value = cell.column;
-  speedCellForm.elements.row.value = cell.row;
-  speedCellForm.elements.multiplier.value ||= 1;
-}
-
-function renderSpeedCellFormDefaults() {
-  if (!editor.map) {
-    return;
-  }
-
-  speedCellForm.elements.column.value ||= editor.map.entryColumn;
-  speedCellForm.elements.row.value ||= editor.map.entryRow;
-  speedCellForm.elements.multiplier.value ||= 1;
-}
-
-function renderSpeedCellList() {
-  speedCellList.innerHTML = '';
-
-  if (!editor.data.speedCells.length) {
-    speedCellList.innerHTML = '<p class="status">Nenhuma celula com velocidade propria neste mapa.</p>';
-    return;
-  }
-
-  for (const cell of editor.data.speedCells) {
-    const row = document.createElement('div');
-    row.className = 'teleport-row';
-    row.innerHTML = `
-      <strong>V | Col ${cell.column} / Lin ${cell.row}</strong>
-      <small>Multiplicador ${cell.multiplier}x</small>
-    `;
-
-    const actions = document.createElement('div');
-    actions.className = 'editor-actions';
-
-    const editButton = document.createElement('button');
-    editButton.type = 'button';
-    editButton.textContent = 'Editar';
-    editButton.addEventListener('click', () => editSpeedCell(cell));
-
-    const removeButton = document.createElement('button');
-    removeButton.type = 'button';
-    removeButton.textContent = 'Remover';
-    removeButton.addEventListener('click', () => removeSpeedCell(cell.id));
-
-    actions.append(editButton, removeButton);
-    row.append(actions);
-    speedCellList.append(row);
-  }
-}
-
-function upsertLevelCell(values) {
-  if (!editor.map) {
-    return;
-  }
-
-  const cell = {
-    id: values.id || cryptoRandomId(),
-    column: Number(values.column),
-    row: Number(values.row),
-    level: clamp(Number(values.level || 3), 1, 5),
-  };
-
-  if (!isCellInsideMap(cell.column, cell.row, editor.map)) {
-    setStatus('Celula de nivel fora do mapa.');
-    return;
-  }
-
-  const index = editor.data.levelCells.findIndex((item) => item.id === cell.id);
-
-  if (index >= 0) {
-    editor.data.levelCells[index] = cell;
-  } else {
-    const existingIndex = editor.data.levelCells.findIndex((item) => (
-      item.column === cell.column && item.row === cell.row
-    ));
-
-    if (existingIndex >= 0) {
-      editor.data.levelCells[existingIndex] = cell;
-    } else {
-      editor.data.levelCells.push(cell);
-    }
-  }
-
-  levelCellForm.reset();
-  renderLevelCellFormDefaults();
-  renderLevelCellList();
-  renderEditor();
-  setStatus('Nivel da celula pronto para salvar.');
-}
-
-function removeLevelCell(id) {
-  editor.data.levelCells = editor.data.levelCells.filter((cell) => cell.id !== id);
-  renderLevelCellList();
-  renderEditor();
-}
-
-function editLevelCell(cell) {
-  levelCellForm.elements.id.value = cell.id;
-  levelCellForm.elements.column.value = cell.column;
-  levelCellForm.elements.row.value = cell.row;
-  levelCellForm.elements.level.value = cell.level;
-}
-
-function fillLevelCell(cell) {
-  const existing = editor.data.levelCells.find((item) => item.column === cell.column && item.row === cell.row);
-
-  if (existing) {
-    editLevelCell(existing);
-    return;
-  }
-
-  levelCellForm.elements.id.value = '';
-  levelCellForm.elements.column.value = cell.column;
-  levelCellForm.elements.row.value = cell.row;
-  levelCellForm.elements.level.value ||= 3;
-}
-
-function renderLevelCellFormDefaults() {
-  if (!editor.map) {
-    return;
-  }
-
-  levelCellForm.elements.column.value ||= editor.map.entryColumn;
-  levelCellForm.elements.row.value ||= editor.map.entryRow;
-  levelCellForm.elements.level.value ||= 3;
-}
-
-function renderLevelCellList() {
-  levelCellList.innerHTML = '';
-
-  if (!editor.data.levelCells.length) {
-    levelCellList.innerHTML = '<p class="status">Nenhuma celula com nivel proprio neste mapa.</p>';
-    return;
-  }
-
-  for (const cell of editor.data.levelCells) {
-    const row = document.createElement('div');
-    row.className = 'teleport-row';
-    row.innerHTML = `
-      <strong>N${cell.level} | Col ${cell.column} / Lin ${cell.row}</strong>
-      <small>Nivel ${cell.level}</small>
-    `;
-
-    const actions = document.createElement('div');
-    actions.className = 'editor-actions';
-
-    const editButton = document.createElement('button');
-    editButton.type = 'button';
-    editButton.textContent = 'Editar';
-    editButton.addEventListener('click', () => editLevelCell(cell));
-
-    const removeButton = document.createElement('button');
-    removeButton.type = 'button';
-    removeButton.textContent = 'Remover';
-    removeButton.addEventListener('click', () => removeLevelCell(cell.id));
-
-    actions.append(editButton, removeButton);
-    row.append(actions);
-    levelCellList.append(row);
-  }
+function getSelectedCellParamLevel() {
+  return clamp(Number(cellParamLevelSelect.value || 3), 1, 5);
 }
 
 function renderEditor() {
@@ -1265,7 +1074,7 @@ function renderEditorCellBadges() {
   }
 
   for (const cell of editor.data.speedCells) {
-    addCellBadge(cells, cell.column, cell.row, { text: 'V', color: '#dcfce7', background: 'rgba(21, 128, 61, 0.9)' });
+    addCellBadge(cells, cell.column, cell.row, { text: `V${cell.level || 3}`, color: '#dcfce7', background: 'rgba(21, 128, 61, 0.9)' });
   }
 
   for (const cell of editor.data.levelCells) {
@@ -1435,6 +1244,7 @@ function normalizeSpeedCell(cell) {
     id: String(cell?.id || cryptoRandomId()),
     column: Number(cell?.column),
     row: Number(cell?.row),
+    level: clamp(Number(cell?.level || getSpeedLevelFromMultiplier(Number(cell?.multiplier))), 1, 5),
     multiplier: Number(cell?.multiplier),
   };
 
@@ -1445,8 +1255,16 @@ function normalizeSpeedCell(cell) {
     return null;
   }
 
-  normalized.multiplier = clamp(Number.isFinite(normalized.multiplier) ? normalized.multiplier : 1, 0.2, 3);
+  normalized.multiplier = SPEED_LEVEL_MULTIPLIERS[normalized.level] || 1;
   return normalized;
+}
+
+function getSpeedLevelFromMultiplier(multiplier) {
+  if (multiplier <= 0.625) return 1;
+  if (multiplier <= 0.875) return 2;
+  if (multiplier <= 1.125) return 3;
+  if (multiplier <= 1.375) return 4;
+  return 5;
 }
 
 function normalizeLevelCells(data) {

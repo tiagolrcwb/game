@@ -680,8 +680,6 @@
                     <button class="tab-button" type="button" data-map-tab="visual">Visual</button>
                     <button class="tab-button" type="button" data-map-tab="editor">Editor</button>
                     <button class="tab-button" type="button" data-map-tab="teleports">Teleportes</button>
-                    <button class="tab-button" type="button" data-map-tab="speed">Velocidade</button>
-                    <button class="tab-button" type="button" data-map-tab="levels">Niveis</button>
                   </div>
 
                   <div class="tab-panel active" data-map-tab-panel="settings">
@@ -768,6 +766,16 @@
                           <button type="button" data-editor-mode="level">Nivel</button>
                           <button type="button" data-editor-mode="pan">Mover</button>
                         </div>
+                        <label>
+                          Valor
+                          <select data-cell-param-level>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3" selected>3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                          </select>
+                        </label>
                         <div class="editor-actions">
                           <button type="button" data-editor-zoom-out>-</button>
                           <button type="button" data-editor-zoom-in>+</button>
@@ -811,64 +819,6 @@
                         </form>
                       </aside>
                       <div class="teleport-list" data-teleport-list></div>
-                    </div>
-                  </div>
-
-                  <div class="tab-panel" data-map-tab-panel="speed">
-                    <div class="editor-shell">
-                      <aside class="editor-side">
-                        <form class="compact-form" data-speed-cell-form>
-                          <input name="id" type="hidden" />
-                          <div class="grid-two">
-                            <label>
-                              Coluna
-                              <input name="column" type="number" min="1" required />
-                            </label>
-                            <label>
-                              Linha
-                              <input name="row" type="number" min="1" required />
-                            </label>
-                          </div>
-                          <label>
-                            Multiplicador
-                            <input name="multiplier" type="number" min="0.2" max="3" step="0.05" required />
-                          </label>
-                          <button class="primary" type="submit">Salvar celula</button>
-                        </form>
-                      </aside>
-                      <div class="rule-list" data-speed-cell-list></div>
-                    </div>
-                  </div>
-
-                  <div class="tab-panel" data-map-tab-panel="levels">
-                    <div class="editor-shell">
-                      <aside class="editor-side">
-                        <form class="compact-form" data-level-cell-form>
-                          <input name="id" type="hidden" />
-                          <div class="grid-two">
-                            <label>
-                              Coluna
-                              <input name="column" type="number" min="1" required />
-                            </label>
-                            <label>
-                              Linha
-                              <input name="row" type="number" min="1" required />
-                            </label>
-                          </div>
-                          <label>
-                            Nivel
-                            <select name="level" required>
-                              <option value="1">1 - menor</option>
-                              <option value="2">2</option>
-                              <option value="3">3 - normal</option>
-                              <option value="4">4</option>
-                              <option value="5">5 - maior</option>
-                            </select>
-                          </label>
-                          <button class="primary" type="submit">Salvar celula</button>
-                        </form>
-                      </aside>
-                      <div class="rule-list" data-level-cell-list></div>
                     </div>
                   </div>
                 </section>
