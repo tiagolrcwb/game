@@ -164,7 +164,7 @@
           <button class="tab-button" type="button" data-tab="register">Cadastrar</button>
         </div>
 
-        <form class="active" data-form="login">
+        <form class="active" data-form="login" method="post" action="/api/login">
           <label>
             Usu&aacute;rio
             <input name="username" autocomplete="username" required />
@@ -176,7 +176,7 @@
           <button type="submit">Entrar no jogo</button>
         </form>
 
-        <form data-form="register">
+        <form data-form="register" method="post" action="/api/register">
           <label>
             Usu&aacute;rio
             <input name="username" autocomplete="username" minlength="3" maxlength="20" required />

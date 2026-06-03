@@ -17,6 +17,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
 const db = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'mmorpg_dark',
@@ -26,6 +27,11 @@ const db = mysql.createPool({
 
 const server = http.createServer(async (request, response) => {
   try {
+    if (request.method === 'GET' && request.url === '/api/health') {
+      await healthCheck(response);
+      return;
+    }
+
     if (request.method === 'POST' && request.url === '/api/register') {
       await register(request, response);
       return;
@@ -38,16 +44,20 @@ const server = http.createServer(async (request, response) => {
 
     serveStaticFile(request, response);
   } catch (error) {
-    console.error(error);
-    sendJson(response, 500, { error: 'Erro interno do servidor.' });
+    handleUnexpectedError(error, response);
   }
 });
 
 const wss = new WebSocketServer({ server });
 const players = new Map();
 
+async function healthCheck(response) {
+  await db.query('SELECT 1');
+  sendJson(response, 200, { ok: true });
+}
+
 async function register(request, response) {
-  const body = await readJsonBody(request);
+  const body = await readRequestBody(request);
   const username = String(body.username || '').trim();
   const password = String(body.password || '');
 
@@ -82,7 +92,7 @@ async function register(request, response) {
 }
 
 async function login(request, response) {
-  const body = await readJsonBody(request);
+  const body = await readRequestBody(request);
   const username = String(body.username || '').trim();
   const password = String(body.password || '');
 
@@ -119,7 +129,7 @@ function isValidUsername(username) {
   return /^[a-zA-Z0-9_]{3,20}$/.test(username);
 }
 
-function readJsonBody(request) {
+function readRequestBody(request) {
   return new Promise((resolve, reject) => {
     let rawBody = '';
 
@@ -133,7 +143,17 @@ function readJsonBody(request) {
 
     request.on('end', () => {
       try {
-        resolve(rawBody ? JSON.parse(rawBody) : {});
+        if (!rawBody) {
+          resolve({});
+          return;
+        }
+
+        if (isFormUrlEncoded(request)) {
+          resolve(Object.fromEntries(new URLSearchParams(rawBody)));
+          return;
+        }
+
+        resolve(JSON.parse(rawBody));
       } catch (error) {
         reject(error);
       }
@@ -143,9 +163,34 @@ function readJsonBody(request) {
   });
 }
 
+function isFormUrlEncoded(request) {
+  return String(request.headers['content-type'] || '').includes('application/x-www-form-urlencoded');
+}
+
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(payload));
+}
+
+function handleUnexpectedError(error, response) {
+  console.error('Unexpected server error:', {
+    code: error.code,
+    errno: error.errno,
+    sqlState: error.sqlState,
+    message: error.message,
+  });
+
+  if (error.code === 'ER_NO_SUCH_TABLE') {
+    sendJson(response, 500, { error: 'Banco de dados ainda nao preparado. Importe o schema das tabelas.' });
+    return;
+  }
+
+  if (['ECONNREFUSED', 'ER_ACCESS_DENIED_ERROR', 'ENOTFOUND'].includes(error.code)) {
+    sendJson(response, 500, { error: 'Nao foi possivel conectar ao banco de dados.' });
+    return;
+  }
+
+  sendJson(response, 500, { error: 'Erro interno do servidor.' });
 }
 
 function serveStaticFile(request, response) {

@@ -25,6 +25,7 @@ Cadastre no painel da Hostinger:
 
 ```text
 DB_HOST=host_do_mysql
+DB_PORT=3306
 DB_USER=usuario_do_mysql
 DB_PASSWORD=senha_do_mysql
 DB_NAME=nome_do_banco
@@ -32,6 +33,8 @@ JWT_SECRET=uma_chave_longa_e_aleatoria
 ```
 
 Nao suba `.env` para o Git.
+
+Na Hostinger, deixe `PORT` vazio a menos que o painel informe explicitamente uma porta para o app Node.js. `PORT` e a porta HTTP do Node; a porta do MySQL e `DB_PORT`.
 
 ## Banco de dados
 
@@ -60,6 +63,7 @@ npm start
 /game.html     tela do jogo
 /api/register  cadastro
 /api/login     login
+/api/health    teste simples de conexao com o banco
 WebSocket      mesmo host do site, usando ws:// ou wss://
 ```
 
