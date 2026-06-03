@@ -366,8 +366,8 @@ function renderBackground() {
 
   if (world.showCoordinates) {
     renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY);
+    renderActiveCellLabel();
   }
-  renderActiveCellLabel();
 }
 
 function preloadBackgroundImage(source) {

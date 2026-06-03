@@ -165,9 +165,9 @@ teleportForm.addEventListener('submit', (event) => {
 });
 
 editorCanvas.addEventListener('contextmenu', (event) => event.preventDefault());
-editorCanvas.addEventListener('mousedown', beginEditorDrag);
-editorCanvas.addEventListener('mousemove', continueEditorDrag);
-window.addEventListener('mouseup', endEditorDrag);
+editorCanvas.addEventListener('pointerdown', beginEditorDrag);
+editorCanvas.addEventListener('pointermove', continueEditorDrag);
+window.addEventListener('pointerup', endEditorDrag);
 editorCanvas.addEventListener('wheel', handleEditorWheel, { passive: false });
 window.addEventListener('resize', renderEditor);
 
@@ -672,9 +672,11 @@ function beginEditorDrag(event) {
     return;
   }
 
+  event.preventDefault();
   editor.isDragging = true;
   editor.dragButton = event.button;
   editor.paintedCells.clear();
+  ensureEditorDataCollections();
 
   if (Number.isInteger(event.pointerId)) {
     editorCanvas.setPointerCapture?.(event.pointerId);
@@ -703,6 +705,8 @@ function continueEditorDrag(event) {
   if (!editor.map || !editor.isDragging) {
     return;
   }
+
+  event.preventDefault();
 
   if (editor.mode === 'pan' || editor.dragButton === 2) {
     editor.offsetX -= event.movementX / editor.zoom;
@@ -741,6 +745,8 @@ function handleEditorWheel(event) {
 }
 
 function paintEditorCell(cell) {
+  ensureEditorDataCollections();
+
   const key = getCellKey(cell.column, cell.row);
 
   if (editor.paintedCells.has(key)) {
@@ -902,6 +908,7 @@ function applyTeleportCell(cell) {
     return;
   }
 
+  ensureEditorDataCollections();
   renderTeleportFormDefaults();
 
   const values = formToObject(teleportForm);
@@ -934,48 +941,45 @@ function applyTeleportCell(cell) {
 }
 
 function applySpeedCell(cell) {
+  ensureEditorDataCollections();
   const level = getSelectedCellParamLevel();
   const multiplier = SPEED_LEVEL_MULTIPLIERS[level] || 1;
 
   editor.data.speedCells = editor.data.speedCells.filter((item) => (
     item.column !== cell.column || item.row !== cell.row
   ));
-
-  if (level !== 3) {
-    editor.data.speedCells.push({
-      id: cryptoRandomId(),
-      column: cell.column,
-      row: cell.row,
-      level,
-      multiplier,
-    });
-  }
+  editor.data.speedCells.push({
+    id: cryptoRandomId(),
+    column: cell.column,
+    row: cell.row,
+    level,
+    multiplier,
+  });
 
   renderEditor();
-  setStatus(level === 3 ? 'Velocidade da celula voltou ao padrao.' : `Velocidade N${level} aplicada na celula.`);
+  setStatus(`Velocidade V${level} aplicada na celula.`);
 }
 
 function applyLevelCell(cell) {
+  ensureEditorDataCollections();
   const level = getSelectedCellParamLevel();
 
   editor.data.levelCells = editor.data.levelCells.filter((item) => (
     item.column !== cell.column || item.row !== cell.row
   ));
-
-  if (level !== 3) {
-    editor.data.levelCells.push({
-      id: cryptoRandomId(),
-      column: cell.column,
-      row: cell.row,
-      level,
-    });
-  }
+  editor.data.levelCells.push({
+    id: cryptoRandomId(),
+    column: cell.column,
+    row: cell.row,
+    level,
+  });
 
   renderEditor();
-  setStatus(level === 3 ? 'Escala da celula voltou ao padrao.' : `Nivel N${level} aplicado na celula.`);
+  setStatus(`Nivel N${level} aplicado na celula.`);
 }
 
 function eraseCellParameters(cell) {
+  ensureEditorDataCollections();
   const key = getCellKey(cell.column, cell.row);
   editor.data.blockedCellSet.delete(key);
   syncBlockedCellsArray();
@@ -995,6 +999,16 @@ function eraseCellParameters(cell) {
 
 function getSelectedCellParamLevel() {
   return clamp(Number(cellParamLevelSelect.value || 3), 1, 5);
+}
+
+function ensureEditorDataCollections() {
+  const data = editor.data || createEmptyMapData();
+  data.blockedCells = Array.isArray(data.blockedCells) ? data.blockedCells : [];
+  data.blockedCellSet = data.blockedCellSet instanceof Set ? data.blockedCellSet : new Set(data.blockedCells);
+  data.teleportPoints = Array.isArray(data.teleportPoints) ? data.teleportPoints : [];
+  data.speedCells = Array.isArray(data.speedCells) ? data.speedCells : [];
+  data.levelCells = Array.isArray(data.levelCells) ? data.levelCells : [];
+  editor.data = data;
 }
 
 function renderEditor() {

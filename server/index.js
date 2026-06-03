@@ -509,10 +509,6 @@ async function deleteMap(mapId) {
   const [settingsRows] = await db.execute('SELECT default_map_id FROM game_settings WHERE id = 1 LIMIT 1');
   const defaultMapId = Number(settingsRows[0]?.default_map_id || DEFAULT_GAME_CONFIG.map.id);
 
-  if (mapId === defaultMapId) {
-    throw Object.assign(new Error('Nao e possivel remover o mapa inicial do jogo.'), { statusCode: 400 });
-  }
-
   const [mapRows] = await db.execute('SELECT id, background_image_path FROM maps WHERE id = ? LIMIT 1', [mapId]);
 
   if (!mapRows[0]) {
@@ -523,6 +519,25 @@ async function deleteMap(mapId) {
 
   if (Number(countRows[0]?.total || 0) <= 1) {
     throw Object.assign(new Error('O jogo precisa manter pelo menos um mapa.'), { statusCode: 400 });
+  }
+
+  if (mapId === defaultMapId) {
+    const [replacementRows] = await db.execute(
+      'SELECT id FROM maps WHERE id <> ? ORDER BY id LIMIT 1',
+      [mapId],
+    );
+    const replacementMapId = Number(replacementRows[0]?.id || 0);
+
+    if (!replacementMapId) {
+      throw Object.assign(new Error('O jogo precisa manter pelo menos um mapa.'), { statusCode: 400 });
+    }
+
+    await db.execute(
+      `INSERT INTO game_settings (id, game_name, default_map_id)
+        VALUES (1, ?, ?)
+        ON DUPLICATE KEY UPDATE default_map_id = VALUES(default_map_id)`,
+      [DEFAULT_GAME_CONFIG.gameName, replacementMapId],
+    );
   }
 
   await db.execute(
