@@ -349,16 +349,17 @@ function renderActiveCellLabel() {
   }
 
   const { column, row } = getPlayerCell(target);
-  const label = `Col ${column + 1} / Lin ${row + 1}`;
+  const label = `${world.mapName} | Col ${column + 1} / Lin ${row + 1}`;
 
   context.save();
   context.font = '13px Arial';
   context.textAlign = 'left';
   context.textBaseline = 'top';
+  const labelWidth = Math.min(canvas.width - 24, Math.max(172, context.measureText(label).width + 20));
   context.fillStyle = 'rgba(8, 9, 13, 0.78)';
-  context.fillRect(12, 12, 122, 26);
+  context.fillRect(12, 12, labelWidth, 26);
   context.strokeStyle = 'rgba(185, 139, 87, 0.42)';
-  context.strokeRect(12.5, 12.5, 121, 25);
+  context.strokeRect(12.5, 12.5, labelWidth - 1, 25);
   context.fillStyle = '#e3dac8';
   context.fillText(label, 22, 18);
   context.restore();

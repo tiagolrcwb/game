@@ -12,6 +12,7 @@ const PLAYER_SIZE = 24;
 const PLAYER_SPEED = 5;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
+const APP_VERSION = '2026-06-03-map-runtime-2';
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
@@ -52,6 +53,11 @@ const server = http.createServer(async (request, response) => {
   try {
     if (request.method === 'GET' && request.url === '/api/health') {
       await healthCheck(response);
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/api/version') {
+      sendJson(response, 200, { version: APP_VERSION });
       return;
     }
 
@@ -158,6 +164,7 @@ async function handleManagerRequest(request, response) {
     const body = await readRequestBody(request);
     await saveGameSettings(body);
     await reloadGameConfig();
+    resetPlayersToDefaultMapEntry();
     broadcastGameState();
     sendJson(response, 200, await getManagerState());
     return;
@@ -165,8 +172,12 @@ async function handleManagerRequest(request, response) {
 
   if (request.method === 'POST' && request.url === '/api/manager/maps') {
     const body = await readRequestBody(request);
+    const mapId = body.id ? Number(body.id) : null;
     await saveMap(body);
     await reloadGameConfig();
+    if (mapId) {
+      resetPlayersOnMapEntry(mapId);
+    }
     broadcastGameState();
     sendJson(response, 200, await getManagerState());
     return;
@@ -793,6 +804,31 @@ function getOrCreatePlayer(socketId, user) {
   playersByUserId.set(user.id, player);
   players.set(socketId, player);
   return player;
+}
+
+function resetPlayersToDefaultMapEntry() {
+  for (const player of playersByUserId.values()) {
+    movePlayerToMapEntry(player, gameConfig.map.id);
+  }
+}
+
+function resetPlayersOnMapEntry(mapId) {
+  for (const player of playersByUserId.values()) {
+    if (player.mapId === mapId) {
+      movePlayerToMapEntry(player, mapId);
+    }
+  }
+}
+
+function movePlayerToMapEntry(player, mapId) {
+  const map = mapsById.get(mapId) || gameConfig.map;
+  const spawn = getMapEntryPosition(map);
+
+  player.mapId = map.id;
+  player.x = spawn.x;
+  player.y = spawn.y;
+  player.isMoving = false;
+  player.direction = 'south';
 }
 
 function schedulePlayerRemoval(player, socketId) {
