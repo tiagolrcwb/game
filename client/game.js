@@ -63,6 +63,8 @@ const DEFAULT_WORLD = {
   speedCells: [],
   levelCells: [],
   gridColor: 'rgba(185, 139, 87, 0.08)',
+  showGrid: true,
+  showCoordinates: true,
   mapId: 1,
   mapName: 'Mapa Inicial',
   exits: {
@@ -167,6 +169,8 @@ function applyStateMessage(message) {
       teleportPoints: Array.isArray(message.world.teleportPoints) ? message.world.teleportPoints : [],
       speedCells: Array.isArray(message.world.speedCells) ? message.world.speedCells : [],
       levelCells: Array.isArray(message.world.levelCells) ? message.world.levelCells : [],
+      showGrid: message.world.showGrid !== false,
+      showCoordinates: message.world.showCoordinates !== false,
     };
 
     if (world.mapId !== previousMapId) {
@@ -332,33 +336,37 @@ function renderBackground() {
   context.fillRect(0, 0, world.width, world.height);
   renderWorldBackgroundImage();
 
-  context.strokeStyle = world.gridColor;
-  context.lineWidth = 1;
-
   const firstGridX = Math.floor(camera.x / world.cellSize) * world.cellSize;
   const lastGridX = Math.min(world.width, camera.x + canvas.width + world.cellSize);
   const firstGridY = Math.floor(camera.y / world.cellSize) * world.cellSize;
   const lastGridY = Math.min(world.height, camera.y + canvas.height + world.cellSize);
 
-  for (let x = firstGridX; x <= lastGridX; x += world.cellSize) {
-    context.beginPath();
-    context.moveTo(x, 0);
-    context.lineTo(x, world.height);
-    context.stroke();
-  }
+  if (world.showGrid) {
+    context.strokeStyle = world.gridColor;
+    context.lineWidth = 1;
 
-  for (let y = firstGridY; y <= lastGridY; y += world.cellSize) {
-    context.beginPath();
-    context.moveTo(firstGridX, y);
-    context.lineTo(lastGridX, y);
-    context.stroke();
+    for (let x = firstGridX; x <= lastGridX; x += world.cellSize) {
+      context.beginPath();
+      context.moveTo(x, 0);
+      context.lineTo(x, world.height);
+      context.stroke();
+    }
+
+    for (let y = firstGridY; y <= lastGridY; y += world.cellSize) {
+      context.beginPath();
+      context.moveTo(firstGridX, y);
+      context.lineTo(lastGridX, y);
+      context.stroke();
+    }
   }
 
   context.strokeStyle = WORLD_BORDER_COLOR;
   context.strokeRect(0.5, 0.5, world.width - 1, world.height - 1);
   context.restore();
 
-  renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY);
+  if (world.showCoordinates) {
+    renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY);
+  }
   renderActiveCellLabel();
 }
 

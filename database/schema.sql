@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS maps (
   background_image_path VARCHAR(255) NULL,
   map_data_path VARCHAR(255) NULL,
   grid_color VARCHAR(40) NOT NULL DEFAULT 'rgba(185, 139, 87, 0.08)',
+  show_grid TINYINT(1) NOT NULL DEFAULT 1,
+  show_coordinates TINYINT(1) NOT NULL DEFAULT 1,
   north_map_id INT UNSIGNED NULL,
   east_map_id INT UNSIGNED NULL,
   south_map_id INT UNSIGNED NULL,

@@ -481,6 +481,8 @@ function fillMapForm(map) {
   mapForm.elements.cellSize.value = map.cellSize;
   mapForm.elements.characterSize.value = map.characterSize;
   mapForm.elements.movementSpeed.value = map.movementSpeed || 5;
+  mapForm.elements.showGrid.value = String(map.showGrid !== false);
+  mapForm.elements.showCoordinates.value = String(map.showCoordinates !== false);
   mapForm.elements.entryColumn.value = map.entryColumn;
   mapForm.elements.entryRow.value = map.entryRow;
   mapForm.elements.backgroundColor.value = map.backgroundColor;
@@ -520,6 +522,8 @@ function setDefaultMapFormValues() {
   mapForm.elements.cellSize.value ||= 16;
   mapForm.elements.characterSize.value ||= 64;
   mapForm.elements.movementSpeed.value ||= 5;
+  mapForm.elements.showGrid.value ||= 'true';
+  mapForm.elements.showCoordinates.value ||= 'true';
   mapForm.elements.entryColumn.value ||= 500;
   mapForm.elements.entryRow.value ||= 500;
   mapForm.elements.backgroundColor.value ||= '#15161d';
@@ -690,23 +694,9 @@ function beginEditorDrag(event) {
   if (editor.mode === 'collision') {
     const key = getCellKey(cell.column, cell.row);
     editor.brushAddsCollision = !editor.data.blockedCellSet.has(key);
-    paintCollisionCell(cell);
-    return;
   }
 
-  if (editor.mode === 'teleport') {
-    fillTeleportOrigin(cell);
-    return;
-  }
-
-  if (editor.mode === 'speed') {
-    applySpeedCell(cell);
-    return;
-  }
-
-  if (editor.mode === 'level') {
-    applyLevelCell(cell);
-  }
+  paintEditorCell(cell);
 }
 
 function continueEditorDrag(event) {
@@ -722,10 +712,10 @@ function continueEditorDrag(event) {
     return;
   }
 
-  if (editor.mode === 'collision') {
+  if (['collision', 'teleport', 'speed', 'level', 'erase'].includes(editor.mode)) {
     const cell = eventToCell(event);
     if (cell) {
-      paintCollisionCell(cell);
+      paintEditorCell(cell);
     }
   }
 }
@@ -750,7 +740,7 @@ function handleEditorWheel(event) {
   setEditorZoom(editor.zoom * factor, anchor);
 }
 
-function paintCollisionCell(cell) {
+function paintEditorCell(cell) {
   const key = getCellKey(cell.column, cell.row);
 
   if (editor.paintedCells.has(key)) {
@@ -759,14 +749,36 @@ function paintCollisionCell(cell) {
 
   editor.paintedCells.add(key);
 
-  if (editor.brushAddsCollision) {
-    editor.data.blockedCellSet.add(key);
-  } else {
-    editor.data.blockedCellSet.delete(key);
+  if (editor.mode === 'collision') {
+    if (editor.brushAddsCollision) {
+      editor.data.blockedCellSet.add(key);
+    } else {
+      editor.data.blockedCellSet.delete(key);
+    }
+
+    syncBlockedCellsArray();
+    renderEditor();
+    return;
   }
 
-  syncBlockedCellsArray();
-  renderEditor();
+  if (editor.mode === 'teleport') {
+    applyTeleportCell(cell);
+    return;
+  }
+
+  if (editor.mode === 'speed') {
+    applySpeedCell(cell);
+    return;
+  }
+
+  if (editor.mode === 'level') {
+    applyLevelCell(cell);
+    return;
+  }
+
+  if (editor.mode === 'erase') {
+    eraseCellParameters(cell);
+  }
 }
 
 function upsertTeleportPoint(values) {
@@ -885,6 +897,42 @@ function renderTeleportList() {
   }
 }
 
+function applyTeleportCell(cell) {
+  if (!editor.map) {
+    return;
+  }
+
+  renderTeleportFormDefaults();
+
+  const values = formToObject(teleportForm);
+  const targetMapId = Number(values.targetMapId || editor.map.id);
+  const targetMap = state.maps.find((map) => map.id === targetMapId);
+  const targetColumn = Number(values.targetColumn || targetMap?.entryColumn || editor.map.entryColumn);
+  const targetRow = Number(values.targetRow || targetMap?.entryRow || editor.map.entryRow);
+
+  if (!targetMap || !isCellInsideMap(targetColumn, targetRow, targetMap)) {
+    fillTeleportOrigin(cell);
+    setStatus('Defina um destino valido para usar o pincel de teleporte.');
+    return;
+  }
+
+  editor.data.teleportPoints = editor.data.teleportPoints.filter((point) => (
+    point.column !== cell.column || point.row !== cell.row
+  ));
+  editor.data.teleportPoints.push({
+    id: cryptoRandomId(),
+    column: cell.column,
+    row: cell.row,
+    targetMapId,
+    targetColumn,
+    targetRow,
+  });
+
+  renderTeleportList();
+  renderEditor();
+  setStatus('Teleporte aplicado com pincel.');
+}
+
 function applySpeedCell(cell) {
   const level = getSelectedCellParamLevel();
   const multiplier = SPEED_LEVEL_MULTIPLIERS[level] || 1;
@@ -927,6 +975,24 @@ function applyLevelCell(cell) {
   setStatus(level === 3 ? 'Escala da celula voltou ao padrao.' : `Nivel N${level} aplicado na celula.`);
 }
 
+function eraseCellParameters(cell) {
+  const key = getCellKey(cell.column, cell.row);
+  editor.data.blockedCellSet.delete(key);
+  syncBlockedCellsArray();
+  editor.data.teleportPoints = editor.data.teleportPoints.filter((point) => (
+    point.column !== cell.column || point.row !== cell.row
+  ));
+  editor.data.speedCells = editor.data.speedCells.filter((item) => (
+    item.column !== cell.column || item.row !== cell.row
+  ));
+  editor.data.levelCells = editor.data.levelCells.filter((item) => (
+    item.column !== cell.column || item.row !== cell.row
+  ));
+  renderTeleportList();
+  renderEditor();
+  setStatus('Parametros da celula apagados.');
+}
+
 function getSelectedCellParamLevel() {
   return clamp(Number(cellParamLevelSelect.value || 3), 1, 5);
 }
@@ -956,6 +1022,7 @@ function renderEditor() {
   renderEditorTeleports();
   renderEditorEntryPoint();
   renderEditorGrid();
+  renderEditorCoordinates();
   renderEditorCellBadges();
   editorContext.restore();
   renderEditorHud();
@@ -981,6 +1048,36 @@ function renderEditorGrid() {
     editorContext.lineTo(bounds.lastColumn * editor.map.cellSize, y);
     editorContext.stroke();
   }
+}
+
+function renderEditorCoordinates() {
+  if (editor.map.showCoordinates === false) {
+    return;
+  }
+
+  const bounds = getVisibleCellBounds();
+  const fontSize = Math.max(10 / editor.zoom, 8);
+
+  editorContext.save();
+  editorContext.font = `${fontSize}px Arial`;
+  editorContext.fillStyle = 'rgba(244, 244, 245, 0.56)';
+  editorContext.textBaseline = 'top';
+
+  for (let column = bounds.firstColumn; column <= bounds.lastColumn; column += 1) {
+    const x = (column - 1) * editor.map.cellSize + 3 / editor.zoom;
+    const y = (bounds.firstRow - 1) * editor.map.cellSize + 3 / editor.zoom;
+    editorContext.textAlign = 'left';
+    editorContext.fillText(String(column), x, y);
+  }
+
+  for (let row = bounds.firstRow; row <= bounds.lastRow; row += 1) {
+    const x = (bounds.firstColumn - 1) * editor.map.cellSize + 3 / editor.zoom;
+    const y = (row - 1) * editor.map.cellSize + 15 / editor.zoom;
+    editorContext.textAlign = 'left';
+    editorContext.fillText(String(row), x, y);
+  }
+
+  editorContext.restore();
 }
 
 function renderEditorCollisions() {

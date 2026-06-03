@@ -12,7 +12,7 @@ const PLAYER_SIZE = 24;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 12 * 1024 * 1024;
-const APP_VERSION = '2026-06-03-cell-params-1';
+const APP_VERSION = '2026-06-03-cell-brush-1';
 const SPEED_LEVEL_MULTIPLIERS = {
   1: 0.5,
   2: 0.75,
@@ -43,6 +43,8 @@ const DEFAULT_GAME_CONFIG = {
     backgroundImagePath: null,
     mapDataPath: '/assets/maps/data/map-1.json',
     gridColor: 'rgba(185, 139, 87, 0.08)',
+    showGrid: true,
+    showCoordinates: true,
     exits: {
       north: null,
       east: null,
@@ -437,6 +439,8 @@ async function saveMap(body) {
     entryRow: toBoundedInt(body.entryRow, 1, heightCells, 'Linha de entrada invalida.'),
     backgroundColor: normalizeColor(body.backgroundColor, '#15161d'),
     gridColor: normalizeText(body.gridColor || 'rgba(185, 139, 87, 0.08)', 3, 40),
+    showGrid: normalizeBoolean(body.showGrid, true),
+    showCoordinates: normalizeBoolean(body.showCoordinates, true),
     northMapId: nullablePositiveInt(body.northMapId),
     eastMapId: nullablePositiveInt(body.eastMapId),
     southMapId: nullablePositiveInt(body.southMapId),
@@ -449,7 +453,7 @@ async function saveMap(body) {
       `UPDATE maps
         SET name = ?, width_cells = ?, height_cells = ?, cell_size = ?, character_size = ?,
           movement_speed = ?, entry_column = ?, entry_row = ?,
-          background_color = ?, grid_color = ?, north_map_id = ?, east_map_id = ?,
+          background_color = ?, grid_color = ?, show_grid = ?, show_coordinates = ?, north_map_id = ?, east_map_id = ?,
           south_map_id = ?, west_map_id = ?
         WHERE id = ?`,
       [
@@ -463,6 +467,8 @@ async function saveMap(body) {
         map.entryRow,
         map.backgroundColor,
         map.gridColor,
+        map.showGrid ? 1 : 0,
+        map.showCoordinates ? 1 : 0,
         map.northMapId,
         map.eastMapId,
         map.southMapId,
@@ -476,8 +482,8 @@ async function saveMap(body) {
   await db.execute(
     `INSERT INTO maps
       (name, width_cells, height_cells, cell_size, character_size, movement_speed, entry_column, entry_row, background_color, grid_color,
-        north_map_id, east_map_id, south_map_id, west_map_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        show_grid, show_coordinates, north_map_id, east_map_id, south_map_id, west_map_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       map.name,
       map.widthCells,
@@ -489,6 +495,8 @@ async function saveMap(body) {
       map.entryRow,
       map.backgroundColor,
       map.gridColor,
+      map.showGrid ? 1 : 0,
+      map.showCoordinates ? 1 : 0,
       map.northMapId,
       map.eastMapId,
       map.southMapId,
@@ -879,6 +887,8 @@ function mapMapRow(row) {
     backgroundImagePath: row.background_image_path || null,
     mapDataPath: row.map_data_path || getMapDataPublicPath(row.id),
     gridColor: row.grid_color,
+    showGrid: row.show_grid === undefined ? true : Boolean(row.show_grid),
+    showCoordinates: row.show_coordinates === undefined ? true : Boolean(row.show_coordinates),
     exits: {
       north: row.north_map_id,
       east: row.east_map_id,
@@ -965,6 +975,14 @@ function normalizeColor(value, fallback) {
   }
 
   return color;
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  return value === true || value === 'true' || value === '1' || value === 1;
 }
 
 function toPositiveInt(value, message) {
@@ -1315,6 +1333,8 @@ function createGameConfigPayload(map, mapData = createDefaultMapData(map)) {
       backgroundImagePath: map.backgroundImagePath,
       mapDataPath: map.mapDataPath || getMapDataPublicPath(map.id),
       gridColor: map.gridColor,
+      showGrid: map.showGrid,
+      showCoordinates: map.showCoordinates,
       mapId: map.id,
       mapName: map.name,
       exits: map.exits,

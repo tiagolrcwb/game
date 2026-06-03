@@ -1,0 +1,5 @@
+ALTER TABLE maps
+  ADD COLUMN show_grid TINYINT(1) NOT NULL DEFAULT 1 AFTER grid_color;
+
+ALTER TABLE maps
+  ADD COLUMN show_coordinates TINYINT(1) NOT NULL DEFAULT 1 AFTER show_grid;
