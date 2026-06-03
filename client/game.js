@@ -48,6 +48,10 @@ const DEFAULT_WORLD = {
   cellSize: 32,
   characterSize: 64,
   backgroundColor: '#15161d',
+  backgroundImagePath: null,
+  mapDataPath: '/assets/maps/data/map-1.json',
+  blockedCells: [],
+  teleportPoints: [],
   gridColor: 'rgba(185, 139, 87, 0.08)',
   mapId: 1,
   mapName: 'Mapa Inicial',
@@ -81,6 +85,7 @@ const characterSprites = Object.fromEntries(
     return [direction, image];
   }),
 );
+const backgroundImages = new Map();
 let lastSentDirection = { dx: 0, dy: 0 };
 let world = { ...DEFAULT_WORLD };
 let camera = { x: 0, y: 0 };
@@ -147,11 +152,15 @@ function applyStateMessage(message) {
       heightCells: Number(message.world.heightCells) || DEFAULT_WORLD.heightCells,
       cellSize: Number(message.world.cellSize) || DEFAULT_WORLD.cellSize,
       characterSize: Number(message.world.characterSize) || DEFAULT_WORLD.characterSize,
+      blockedCells: Array.isArray(message.world.blockedCells) ? message.world.blockedCells : [],
+      teleportPoints: Array.isArray(message.world.teleportPoints) ? message.world.teleportPoints : [],
     };
 
     if (world.mapId !== previousMapId) {
       camera = { x: 0, y: 0 };
     }
+
+    preloadBackgroundImage(world.backgroundImagePath);
   }
 
   if (!Array.isArray(message.players)) {
@@ -308,6 +317,7 @@ function renderBackground() {
 
   context.fillStyle = world.backgroundColor;
   context.fillRect(0, 0, world.width, world.height);
+  renderWorldBackgroundImage();
 
   context.strokeStyle = world.gridColor;
   context.lineWidth = 1;
@@ -337,6 +347,26 @@ function renderBackground() {
 
   renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY);
   renderActiveCellLabel();
+}
+
+function preloadBackgroundImage(source) {
+  if (!source || backgroundImages.has(source)) {
+    return;
+  }
+
+  const image = new Image();
+  image.src = `${source}?v=${encodeURIComponent(world.mapId || '')}`;
+  backgroundImages.set(source, image);
+}
+
+function renderWorldBackgroundImage() {
+  const image = world.backgroundImagePath ? backgroundImages.get(world.backgroundImagePath) : null;
+
+  if (!image || !image.complete || image.naturalWidth === 0) {
+    return;
+  }
+
+  context.drawImage(image, 0, 0, world.width, world.height);
 }
 
 function renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY) {

@@ -215,9 +215,79 @@
         color: #a9d6b1;
       }
 
+      .editor-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        gap: 16px;
+      }
+
+      .editor-toolbar,
+      .editor-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .editor-actions {
+        justify-content: flex-end;
+      }
+
+      .segmented {
+        display: inline-flex;
+        border: 1px solid #302c27;
+      }
+
+      .segmented button {
+        border: 0;
+        border-right: 1px solid #302c27;
+      }
+
+      .segmented button:last-child {
+        border-right: 0;
+      }
+
+      .segmented button.active {
+        background: #b98b57;
+        color: #120e0a;
+        font-weight: 700;
+      }
+
+      .map-editor-canvas {
+        width: 100%;
+        height: min(66vh, 680px);
+        min-height: 420px;
+        border: 1px solid #302c27;
+        background: #0d0f14;
+        display: block;
+        cursor: crosshair;
+      }
+
+      .editor-side {
+        display: grid;
+        align-content: start;
+        gap: 14px;
+      }
+
+      .teleport-list {
+        display: grid;
+        gap: 8px;
+        max-height: 260px;
+        overflow: auto;
+      }
+
+      .teleport-row {
+        display: grid;
+        gap: 6px;
+        border: 1px solid #27241f;
+        background: #0d0f14;
+        padding: 10px;
+      }
+
       @media (max-width: 860px) {
         .grid-two,
-        .grid-three {
+        .grid-three,
+        .editor-shell {
           grid-template-columns: 1fr;
         }
 
@@ -345,6 +415,71 @@
               </div>
             </form>
             <div class="list" data-map-list></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Editor de mapa</h2>
+            <div class="editor-actions">
+              <button type="button" data-editor-zoom-out>-</button>
+              <button type="button" data-editor-zoom-in>+</button>
+              <button class="primary" type="button" data-editor-save>Salvar editor</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="editor-shell">
+              <div class="form-grid">
+                <div class="editor-toolbar">
+                  <label>
+                    Mapa
+                    <select data-editor-map></select>
+                  </label>
+                  <div class="segmented" role="group" aria-label="Modo do editor">
+                    <button class="active" type="button" data-editor-mode="collision">Colisao</button>
+                    <button type="button" data-editor-mode="teleport">Teleporte</button>
+                    <button type="button" data-editor-mode="pan">Mover</button>
+                  </div>
+                  <label>
+                    Background
+                    <input type="file" accept="image/png,image/jpeg,image/webp" data-editor-background />
+                  </label>
+                </div>
+                <canvas class="map-editor-canvas" data-map-editor width="960" height="620"></canvas>
+              </div>
+
+              <aside class="editor-side">
+                <form class="compact-form" data-teleport-form>
+                  <input name="id" type="hidden" />
+                  <div class="grid-two">
+                    <label>
+                      Origem col
+                      <input name="column" type="number" min="1" required />
+                    </label>
+                    <label>
+                      Origem lin
+                      <input name="row" type="number" min="1" required />
+                    </label>
+                  </div>
+                  <label>
+                    Mapa destino
+                    <select name="targetMapId" data-teleport-target required></select>
+                  </label>
+                  <div class="grid-two">
+                    <label>
+                      Destino col
+                      <input name="targetColumn" type="number" min="1" required />
+                    </label>
+                    <label>
+                      Destino lin
+                      <input name="targetRow" type="number" min="1" required />
+                    </label>
+                  </div>
+                  <button class="primary" type="submit">Salvar teleporte</button>
+                </form>
+                <div class="teleport-list" data-teleport-list></div>
+              </aside>
+            </div>
           </div>
         </section>
 

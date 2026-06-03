@@ -12,9 +12,12 @@ const PLAYER_SIZE = 24;
 const PLAYER_SPEED = 5;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
-const APP_VERSION = '2026-06-03-map-runtime-3';
+const APP_VERSION = '2026-06-03-map-runtime-4';
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
+const MAP_ASSETS_DIR = path.join(CLIENT_DIR, 'assets', 'maps');
+const MAP_DATA_DIR = path.join(MAP_ASSETS_DIR, 'data');
+const MAP_BACKGROUND_DIR = path.join(MAP_ASSETS_DIR, 'backgrounds');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const MANAGER_TOKEN = process.env.MANAGER_TOKEN || '';
 const DEFAULT_GAME_CONFIG = {
@@ -29,6 +32,8 @@ const DEFAULT_GAME_CONFIG = {
     entryColumn: 500,
     entryRow: 500,
     backgroundColor: '#15161d',
+    backgroundImagePath: null,
+    mapDataPath: '/assets/maps/data/map-1.json',
     gridColor: 'rgba(185, 139, 87, 0.08)',
     exits: {
       north: null,
@@ -51,6 +56,8 @@ const db = mysql.createPool({
 
 const server = http.createServer(async (request, response) => {
   try {
+    const url = new URL(request.url, `http://localhost:${PORT}`);
+
     if (request.method === 'GET' && request.url === '/api/health') {
       await healthCheck(response);
       return;
@@ -63,7 +70,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'GET' && request.url === '/api/game-config') {
       await reloadGameConfig();
-      sendJson(response, 200, createGameConfigPayload(gameConfig.map));
+      sendJson(response, 200, createGameConfigPayload(gameConfig.map, await readMapData(gameConfig.map)));
       return;
     }
 
@@ -93,6 +100,7 @@ const players = new Map();
 const playersByUserId = new Map();
 let gameConfig = DEFAULT_GAME_CONFIG;
 const mapsById = new Map([[DEFAULT_GAME_CONFIG.map.id, DEFAULT_GAME_CONFIG.map]]);
+const mapDataCache = new Map();
 const heartbeatInterval = setInterval(() => {
   for (const socket of wss.clients) {
     if (!socket.isAlive) {
@@ -130,7 +138,9 @@ async function healthCheck(response) {
 }
 
 async function handleManagerRequest(request, response) {
-  if (request.method === 'POST' && request.url === '/api/manager/session') {
+  const url = new URL(request.url, `http://localhost:${PORT}`);
+
+  if (request.method === 'POST' && url.pathname === '/api/manager/session') {
     const body = await readRequestBody(request);
 
     if (!isManagerTokenValid(body.token)) {
@@ -147,36 +157,36 @@ async function handleManagerRequest(request, response) {
     return;
   }
 
-  if (request.method === 'GET' && request.url === '/api/manager/state') {
+  if (request.method === 'GET' && url.pathname === '/api/manager/state') {
     sendJson(response, 200, await getManagerState());
     return;
   }
 
-  if (request.method === 'GET' && request.url === '/api/manager/migrations') {
+  if (request.method === 'GET' && url.pathname === '/api/manager/migrations') {
     sendJson(response, 200, { migrations: await getMigrations() });
     return;
   }
 
-  if (request.method === 'POST' && request.url === '/api/manager/migrations/apply') {
+  if (request.method === 'POST' && url.pathname === '/api/manager/migrations/apply') {
     const body = await readRequestBody(request);
     await applyMigration(String(body.filename || ''));
     await reloadGameConfig();
-    broadcastGameState();
+    await broadcastGameState();
     sendJson(response, 200, { migrations: await getMigrations() });
     return;
   }
 
-  if (request.method === 'PUT' && request.url === '/api/manager/settings') {
+  if (request.method === 'PUT' && url.pathname === '/api/manager/settings') {
     const body = await readRequestBody(request);
     await saveGameSettings(body);
     await reloadGameConfig();
     resetPlayersToDefaultMapEntry();
-    broadcastGameState();
+    await broadcastGameState();
     sendJson(response, 200, await getManagerState());
     return;
   }
 
-  if (request.method === 'POST' && request.url === '/api/manager/maps') {
+  if (request.method === 'POST' && url.pathname === '/api/manager/maps') {
     const body = await readRequestBody(request);
     const mapId = body.id ? Number(body.id) : null;
     await saveMap(body);
@@ -186,19 +196,58 @@ async function handleManagerRequest(request, response) {
     } else {
       resetPlayersToDefaultMapEntry();
     }
-    broadcastGameState();
+    await broadcastGameState();
     sendJson(response, 200, await getManagerState());
     return;
   }
 
-  if (request.method === 'POST' && request.url === '/api/manager/races') {
+  if (request.method === 'GET' && url.pathname === '/api/manager/map-editor') {
+    const mapId = toPositiveInt(url.searchParams.get('mapId'), 'Mapa invalido.');
+    const map = await getMapById(mapId);
+
+    sendJson(response, 200, {
+      map,
+      data: await readMapData(map),
+    });
+    return;
+  }
+
+  if (request.method === 'PUT' && url.pathname === '/api/manager/map-editor') {
+    const body = await readRequestBody(request);
+    const mapId = toPositiveInt(body.mapId, 'Mapa invalido.');
+    const map = await getMapById(mapId);
+    const data = normalizeMapData(body.data || body, map);
+
+    await writeMapData(map, data);
+    await broadcastGameState();
+    sendJson(response, 200, {
+      map,
+      data,
+    });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/manager/map-background') {
+    const body = await readRequestBody(request);
+    const mapId = toPositiveInt(body.mapId, 'Mapa invalido.');
+    const map = await getMapById(mapId);
+    const backgroundImagePath = await saveMapBackground(map.id, String(body.dataUrl || ''));
+
+    await db.execute('UPDATE maps SET background_image_path = ? WHERE id = ?', [backgroundImagePath, map.id]);
+    await reloadGameConfig();
+    await broadcastGameState();
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/manager/races') {
     const body = await readRequestBody(request);
     await saveTaxonomy('races', body);
     sendJson(response, 200, await getManagerState());
     return;
   }
 
-  if (request.method === 'POST' && request.url === '/api/manager/classes') {
+  if (request.method === 'POST' && url.pathname === '/api/manager/classes') {
     const body = await readRequestBody(request);
     await saveTaxonomy('character_classes', body);
     sendJson(response, 200, await getManagerState());
@@ -235,10 +284,7 @@ async function getManagerState() {
     'SELECT id, game_name, default_map_id FROM game_settings WHERE id = 1 LIMIT 1',
   );
   const [mapRows] = await db.execute(
-    `SELECT id, name, width_cells, height_cells, cell_size, character_size,
-      entry_column, entry_row, background_color, grid_color,
-      north_map_id, east_map_id, south_map_id, west_map_id
-      FROM maps ORDER BY id`,
+    'SELECT * FROM maps ORDER BY id',
   );
   const [raceRows] = await db.execute(
     'SELECT id, name, description, is_active FROM races ORDER BY name',
@@ -443,6 +489,164 @@ async function ensureMapIdsExist(ids) {
   }
 }
 
+async function getMapById(mapId) {
+  const [rows] = await db.execute('SELECT * FROM maps WHERE id = ? LIMIT 1', [mapId]);
+
+  if (!rows[0]) {
+    throw Object.assign(new Error('Mapa nao encontrado.'), { statusCode: 404 });
+  }
+
+  return mapMapRow(rows[0]);
+}
+
+function ensureMapAssetDirectories() {
+  for (const directory of [MAP_DATA_DIR, MAP_BACKGROUND_DIR]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+}
+
+function getMapDataPublicPath(mapId) {
+  return `/assets/maps/data/map-${mapId}.json`;
+}
+
+function getMapDataFilePath(mapId) {
+  return path.join(MAP_DATA_DIR, `map-${mapId}.json`);
+}
+
+function createDefaultMapData(map) {
+  return {
+    version: 1,
+    widthCells: map.widthCells,
+    heightCells: map.heightCells,
+    blockedCells: [],
+    teleportPoints: [],
+  };
+}
+
+async function readMapData(map) {
+  ensureMapAssetDirectories();
+
+  if (mapDataCache.has(map.id)) {
+    return mapDataCache.get(map.id);
+  }
+
+  const filePath = getMapDataFilePath(map.id);
+  let data = createDefaultMapData(map);
+
+  if (fs.existsSync(filePath)) {
+    try {
+      data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (error) {
+      console.warn(`Invalid map data for map ${map.id}:`, error.message);
+    }
+  }
+
+  data = normalizeMapData(data, map);
+  mapDataCache.set(map.id, data);
+  return data;
+}
+
+async function writeMapData(map, data) {
+  ensureMapAssetDirectories();
+  const normalized = normalizeMapData(data, map);
+  const filePath = getMapDataFilePath(map.id);
+
+  fs.writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`);
+  mapDataCache.set(map.id, normalized);
+  await db.execute('UPDATE maps SET map_data_path = ? WHERE id = ?', [getMapDataPublicPath(map.id), map.id]);
+}
+
+function normalizeMapData(data, map) {
+  const blockedCells = Array.isArray(data.blockedCells)
+    ? [...new Set(data.blockedCells.map(normalizeCellKey).filter((cellKey) => isCellKeyInsideMap(cellKey, map)))]
+    : [];
+  const teleportPoints = Array.isArray(data.teleportPoints)
+    ? data.teleportPoints.map((point) => normalizeTeleportPoint(point, map)).filter(Boolean)
+    : [];
+
+  return {
+    version: 1,
+    widthCells: map.widthCells,
+    heightCells: map.heightCells,
+    blockedCells,
+    teleportPoints,
+  };
+}
+
+function normalizeCellKey(value) {
+  if (typeof value === 'string') {
+    const [column, row] = value.split(',').map(Number);
+    return Number.isInteger(column) && Number.isInteger(row) ? `${column},${row}` : '';
+  }
+
+  if (value && typeof value === 'object') {
+    const column = Number(value.column);
+    const row = Number(value.row);
+    return Number.isInteger(column) && Number.isInteger(row) ? `${column},${row}` : '';
+  }
+
+  return '';
+}
+
+function isCellKeyInsideMap(cellKey, map) {
+  const [column, row] = cellKey.split(',').map(Number);
+  return column >= 1 && column <= map.widthCells && row >= 1 && row <= map.heightCells;
+}
+
+function normalizeTeleportPoint(point, map) {
+  const column = Number(point?.column);
+  const row = Number(point?.row);
+  const targetMapId = Number(point?.targetMapId);
+  const targetColumn = Number(point?.targetColumn || 0);
+  const targetRow = Number(point?.targetRow || 0);
+
+  if (
+    !Number.isInteger(column) ||
+    !Number.isInteger(row) ||
+    !Number.isInteger(targetMapId) ||
+    !isCellKeyInsideMap(`${column},${row}`, map) ||
+    !mapsById.has(targetMapId)
+  ) {
+    return null;
+  }
+
+  const targetMap = mapsById.get(targetMapId);
+
+  return {
+    id: String(point.id || crypto.randomUUID()),
+    column,
+    row,
+    targetMapId,
+    targetColumn: Number.isInteger(targetColumn) && targetColumn >= 1 && targetColumn <= targetMap.widthCells
+      ? targetColumn
+      : targetMap.entryColumn,
+    targetRow: Number.isInteger(targetRow) && targetRow >= 1 && targetRow <= targetMap.heightCells
+      ? targetRow
+      : targetMap.entryRow,
+  };
+}
+
+async function saveMapBackground(mapId, dataUrl) {
+  ensureMapAssetDirectories();
+
+  const match = dataUrl.match(/^data:image\/(png|jpeg|webp);base64,([a-zA-Z0-9+/=]+)$/);
+
+  if (!match) {
+    throw Object.assign(new Error('Imagem invalida. Use PNG, JPG ou WEBP.'), { statusCode: 400 });
+  }
+
+  const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
+  const content = Buffer.from(match[2], 'base64');
+
+  if (content.length > 6 * 1024 * 1024) {
+    throw Object.assign(new Error('Imagem muito grande. Limite de 6 MB.'), { statusCode: 400 });
+  }
+
+  const fileName = `map-${mapId}.${extension}`;
+  fs.writeFileSync(path.join(MAP_BACKGROUND_DIR, fileName), content);
+  return `/assets/maps/backgrounds/${fileName}`;
+}
+
 async function saveTaxonomy(table, body) {
   if (!['races', 'character_classes'].includes(table)) {
     throw new Error('Invalid taxonomy table.');
@@ -480,6 +684,8 @@ function mapMapRow(row) {
     entryColumn: row.entry_column,
     entryRow: row.entry_row,
     backgroundColor: row.background_color,
+    backgroundImagePath: row.background_image_path || null,
+    mapDataPath: row.map_data_path || getMapDataPublicPath(row.id),
     gridColor: row.grid_color,
     exits: {
       north: row.north_map_id,
@@ -502,10 +708,7 @@ function mapTaxonomyRow(row) {
 async function reloadGameConfig() {
   try {
     const [mapRows] = await db.execute(
-      `SELECT id, name, width_cells, height_cells, cell_size, character_size,
-        entry_column, entry_row, background_color, grid_color,
-        north_map_id, east_map_id, south_map_id, west_map_id
-        FROM maps ORDER BY id`,
+      'SELECT * FROM maps ORDER BY id',
     );
     mapsById.clear();
 
@@ -515,9 +718,7 @@ async function reloadGameConfig() {
     }
 
     const [rows] = await db.execute(
-      `SELECT gs.game_name, m.id, m.name, m.width_cells, m.height_cells, m.cell_size,
-        m.character_size, m.entry_column, m.entry_row, m.background_color, m.grid_color, m.north_map_id,
-        m.east_map_id, m.south_map_id, m.west_map_id
+      `SELECT gs.game_name, m.*
         FROM game_settings gs
         JOIN maps m ON m.id = gs.default_map_id
         WHERE gs.id = 1
@@ -682,7 +883,7 @@ function readRequestBody(request) {
     request.on('data', (chunk) => {
       rawBody += chunk;
 
-      if (rawBody.length > 1024 * 1024) {
+      if (rawBody.length > 8 * 1024 * 1024) {
         request.destroy();
       }
     });
@@ -773,7 +974,10 @@ function getContentType(filePath) {
   if (extension === '.html') return 'text/html; charset=utf-8';
   if (extension === '.js') return 'text/javascript; charset=utf-8';
   if (extension === '.css') return 'text/css; charset=utf-8';
+  if (extension === '.json') return 'application/json; charset=utf-8';
   if (extension === '.png') return 'image/png';
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+  if (extension === '.webp') return 'image/webp';
 
   return 'application/octet-stream';
 }
@@ -868,28 +1072,28 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function broadcastGameState() {
+async function broadcastGameState() {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) {
       continue;
     }
 
-    client.send(JSON.stringify(createGameStateMessage(client.player)));
+    client.send(JSON.stringify(await createGameStateMessage(client.player)));
   }
 }
 
-function createGameStateMessage(viewer) {
+async function createGameStateMessage(viewer) {
   const map = getMapForPlayer(viewer);
   const visiblePlayers = Array.from(players.values()).filter((player) => player.mapId === map.id);
 
   return {
     type: 'state',
-    ...createGameConfigPayload(map),
+    ...createGameConfigPayload(map, await readMapData(map)),
     players: visiblePlayers,
   };
 }
 
-function createGameConfigPayload(map) {
+function createGameConfigPayload(map, mapData = createDefaultMapData(map)) {
   return {
     version: APP_VERSION,
     game: {
@@ -905,16 +1109,21 @@ function createGameConfigPayload(map) {
       entryColumn: map.entryColumn,
       entryRow: map.entryRow,
       backgroundColor: map.backgroundColor,
+      backgroundImagePath: map.backgroundImagePath,
+      mapDataPath: map.mapDataPath || getMapDataPublicPath(map.id),
       gridColor: map.gridColor,
       mapId: map.id,
       mapName: map.name,
       exits: map.exits,
+      blockedCells: mapData.blockedCells,
+      teleportPoints: mapData.teleportPoints,
     },
   };
 }
 
-function handleMove(player, dx, dy) {
+async function handleMove(player, dx, dy) {
   const map = getMapForPlayer(player);
+  const mapData = await readMapData(map);
   const normalizedDx = Math.sign(Number(dx) || 0);
   const normalizedDy = Math.sign(Number(dy) || 0);
 
@@ -924,10 +1133,19 @@ function handleMove(player, dx, dy) {
     player.direction = getPlayerDirection(normalizedDx, normalizedDy);
   }
 
-  player.x += normalizedDx * PLAYER_SPEED;
-  player.y += normalizedDy * PLAYER_SPEED;
+  const nextX = player.x + normalizedDx * PLAYER_SPEED;
+  const nextY = player.y + normalizedDy * PLAYER_SPEED;
+
+  if (!isBlockedPosition(nextX, nextY, map, mapData)) {
+    player.x = nextX;
+    player.y = nextY;
+  }
 
   if (tryTeleportAtMapEdge(player, map)) {
+    return;
+  }
+
+  if (tryTeleportAtCell(player, map, mapData)) {
     return;
   }
 
@@ -962,6 +1180,40 @@ function tryTeleportAtMapEdge(player, map) {
   return false;
 }
 
+function isBlockedPosition(x, y, map, mapData) {
+  const blocked = new Set(mapData.blockedCells);
+  const probeCells = [
+    getCellFromPosition(x + PLAYER_SIZE / 2, y + PLAYER_SIZE / 2, map),
+    getCellFromPosition(x + 3, y + 3, map),
+    getCellFromPosition(x + PLAYER_SIZE - 3, y + 3, map),
+    getCellFromPosition(x + 3, y + PLAYER_SIZE - 3, map),
+    getCellFromPosition(x + PLAYER_SIZE - 3, y + PLAYER_SIZE - 3, map),
+  ];
+
+  return probeCells.some((cell) => blocked.has(`${cell.column},${cell.row}`));
+}
+
+function tryTeleportAtCell(player, map, mapData) {
+  const cell = getCellFromPosition(player.x + PLAYER_SIZE / 2, player.y + PLAYER_SIZE / 2, map);
+  const point = mapData.teleportPoints.find((teleportPoint) => (
+    teleportPoint.column === cell.column && teleportPoint.row === cell.row
+  ));
+
+  if (!point) {
+    return false;
+  }
+
+  teleportPlayerToCell(player, point.targetMapId, point.targetColumn, point.targetRow);
+  return true;
+}
+
+function getCellFromPosition(x, y, map) {
+  return {
+    column: clamp(Math.floor(x / map.cellSize) + 1, 1, map.widthCells),
+    row: clamp(Math.floor(y / map.cellSize) + 1, 1, map.heightCells),
+  };
+}
+
 function teleportPlayer(player, targetMapId, fromDirection) {
   const targetMap = mapsById.get(targetMapId);
 
@@ -993,6 +1245,19 @@ function teleportPlayer(player, targetMapId, fromDirection) {
     player.x = clamp(player.x, 0, getWorldWidth(targetMap) - PLAYER_SIZE);
     player.y = targetMap.cellSize;
   }
+}
+
+function teleportPlayerToCell(player, targetMapId, column, row) {
+  const targetMap = mapsById.get(targetMapId);
+
+  if (!targetMap) {
+    return;
+  }
+
+  player.mapId = targetMap.id;
+  player.x = clamp((column - 0.5) * targetMap.cellSize - PLAYER_SIZE / 2, 0, getWorldWidth(targetMap) - PLAYER_SIZE);
+  player.y = clamp((row - 0.5) * targetMap.cellSize - PLAYER_SIZE / 2, 0, getWorldHeight(targetMap) - PLAYER_SIZE);
+  player.isMoving = false;
 }
 
 function getPlayerDirection(dx, dy) {
@@ -1029,14 +1294,14 @@ wss.on('connection', (socket, request) => {
     socket.isAlive = true;
   });
 
-  socket.on('message', (rawMessage) => {
+  socket.on('message', async (rawMessage) => {
     try {
       const message = JSON.parse(rawMessage.toString());
       socket.isAlive = true;
 
       if (message.type === 'move') {
-        handleMove(player, message.dx, message.dy);
-        broadcastGameState();
+        await handleMove(player, message.dx, message.dy);
+        await broadcastGameState();
         return;
       }
 

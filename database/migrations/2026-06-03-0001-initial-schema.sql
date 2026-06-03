@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS maps (
   entry_column INT UNSIGNED NOT NULL DEFAULT 1,
   entry_row INT UNSIGNED NOT NULL DEFAULT 1,
   background_color VARCHAR(20) NOT NULL DEFAULT '#15161d',
+  background_image_path VARCHAR(255) NULL,
+  map_data_path VARCHAR(255) NULL,
   grid_color VARCHAR(40) NOT NULL DEFAULT 'rgba(185, 139, 87, 0.08)',
   north_map_id INT UNSIGNED NULL,
   east_map_id INT UNSIGNED NULL,
