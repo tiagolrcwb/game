@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gerente - Vigilia dos Portoes</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #0d0f14;
+        color: #e3dac8;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      body.locked .manager-app {
+        display: none;
+      }
+
+      body:not(.locked) .login-panel {
+        display: none;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      button {
+        border: 1px solid #3b332b;
+        background: #171820;
+        color: #e3dac8;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border-color: #b98b57;
+        background: #b98b57;
+        color: #120e0a;
+        font-weight: 700;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        border: 1px solid #302c27;
+        background: #11131a;
+        color: #f0e6d4;
+        padding: 10px 11px;
+        outline: none;
+      }
+
+      textarea {
+        min-height: 86px;
+        resize: vertical;
+      }
+
+      input:focus,
+      textarea:focus,
+      select:focus {
+        border-color: #b98b57;
+        box-shadow: 0 0 0 3px rgba(185, 139, 87, 0.14);
+      }
+
+      label {
+        display: grid;
+        gap: 7px;
+        color: #bfb3a1;
+        font-size: 13px;
+      }
+
+      .login-panel {
+        width: min(420px, calc(100vw - 32px));
+        margin: 12vh auto 0;
+        border: 1px solid #302c27;
+        background: #11131a;
+        padding: 28px;
+      }
+
+      .login-panel form,
+      .form-grid,
+      .compact-form {
+        display: grid;
+        gap: 14px;
+      }
+
+      .manager-app {
+        min-height: 100vh;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 24px;
+        border-bottom: 1px solid #27241f;
+        background: #11131a;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 18px;
+        color: #b98b57;
+        text-transform: uppercase;
+      }
+
+      main {
+        width: min(1280px, calc(100vw - 32px));
+        margin: 24px auto 40px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .status {
+        min-height: 22px;
+        color: #d8c6a6;
+        font-size: 14px;
+      }
+
+      .panel {
+        border: 1px solid #302c27;
+        background: #11131a;
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 16px;
+        border-bottom: 1px solid #27241f;
+      }
+
+      .panel-header h2 {
+        font-size: 16px;
+      }
+
+      .panel-body {
+        padding: 16px;
+      }
+
+      .grid-two {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .grid-three {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .list {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .item {
+        display: grid;
+        gap: 6px;
+        border: 1px solid #27241f;
+        background: #0d0f14;
+        padding: 12px;
+      }
+
+      .item strong {
+        color: #f0e6d4;
+      }
+
+      .item small {
+        color: #9f9484;
+      }
+
+      .map-summary {
+        color: #bfb3a1;
+        font-size: 13px;
+      }
+
+      .migration-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid #27241f;
+        background: #0d0f14;
+        padding: 12px;
+      }
+
+      .badge {
+        border: 1px solid #3b332b;
+        color: #bfb3a1;
+        padding: 5px 8px;
+        font-size: 12px;
+      }
+
+      .badge.ok {
+        border-color: rgba(104, 155, 115, 0.55);
+        color: #a9d6b1;
+      }
+
+      @media (max-width: 860px) {
+        .grid-two,
+        .grid-three {
+          grid-template-columns: 1fr;
+        }
+
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body class="locked">
+    <section class="login-panel" aria-label="Acesso de gerente">
+      <form data-token-form>
+        <h1>Gerente</h1>
+        <label>
+          Token
+          <input name="token" type="password" autocomplete="current-password" required />
+        </label>
+        <button class="primary" type="submit">Entrar</button>
+        <p class="status" data-login-status></p>
+      </form>
+    </section>
+
+    <section class="manager-app">
+      <header class="topbar">
+        <div>
+          <h1>Gerente do jogo</h1>
+          <p class="status" data-status></p>
+        </div>
+        <button type="button" data-logout>Bloquear</button>
+      </header>
+
+      <main>
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Migrations</h2>
+            <div>
+              <button type="button" data-refresh-migrations>Atualizar</button>
+              <button class="primary" type="button" data-apply-pending>Aplicar pendentes</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="list" data-migration-list></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Jogo</h2>
+            <button class="primary" type="submit" form="settings-form">Salvar</button>
+          </div>
+          <div class="panel-body">
+            <form class="form-grid" id="settings-form" data-settings-form>
+              <div class="grid-two">
+                <label>
+                  Nome do jogo
+                  <input name="gameName" required minlength="3" maxlength="80" />
+                </label>
+                <label>
+                  Mapa inicial
+                  <select name="defaultMapId" data-map-select required></select>
+                </label>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Mapas</h2>
+            <button class="primary" type="submit" form="map-form">Salvar mapa</button>
+          </div>
+          <div class="panel-body">
+            <form class="form-grid" id="map-form" data-map-form>
+              <input name="id" type="hidden" />
+              <div class="grid-three">
+                <label>
+                  Nome
+                  <input name="name" required minlength="3" maxlength="80" />
+                </label>
+                <label>
+                  Colunas
+                  <input name="widthCells" type="number" min="10" max="5000" required />
+                </label>
+                <label>
+                  Linhas
+                  <input name="heightCells" type="number" min="10" max="5000" required />
+                </label>
+                <label>
+                  Tamanho da celula
+                  <input name="cellSize" type="number" min="8" max="128" required />
+                </label>
+                <label>
+                  Personagem na celula
+                  <input name="characterSize" type="number" min="16" max="256" required />
+                </label>
+                <label>
+                  Coluna de entrada
+                  <input name="entryColumn" type="number" min="1" max="5000" required />
+                </label>
+                <label>
+                  Linha de entrada
+                  <input name="entryRow" type="number" min="1" max="5000" required />
+                </label>
+                <label>
+                  Cor de fundo
+                  <input name="backgroundColor" type="color" required />
+                </label>
+                <label>
+                  Norte leva para
+                  <select name="northMapId" data-map-exit></select>
+                </label>
+                <label>
+                  Leste leva para
+                  <select name="eastMapId" data-map-exit></select>
+                </label>
+                <label>
+                  Sul leva para
+                  <select name="southMapId" data-map-exit></select>
+                </label>
+                <label>
+                  Oeste leva para
+                  <select name="westMapId" data-map-exit></select>
+                </label>
+              </div>
+            </form>
+            <div class="list" data-map-list></div>
+          </div>
+        </section>
+
+        <div class="grid-two">
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Racas</h2>
+              <button class="primary" type="submit" form="race-form">Salvar raca</button>
+            </div>
+            <div class="panel-body">
+              <form class="compact-form" id="race-form" data-taxonomy-form="races">
+                <input name="id" type="hidden" />
+                <label>
+                  Nome
+                  <input name="name" required minlength="2" maxlength="60" />
+                </label>
+                <label>
+                  Descricao
+                  <textarea name="description"></textarea>
+                </label>
+                <label>
+                  Status
+                  <select name="isActive">
+                    <option value="true">Ativa</option>
+                    <option value="false">Inativa</option>
+                  </select>
+                </label>
+              </form>
+              <div class="list" data-list="races"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Classes</h2>
+              <button class="primary" type="submit" form="class-form">Salvar classe</button>
+            </div>
+            <div class="panel-body">
+              <form class="compact-form" id="class-form" data-taxonomy-form="classes">
+                <input name="id" type="hidden" />
+                <label>
+                  Nome
+                  <input name="name" required minlength="2" maxlength="60" />
+                </label>
+                <label>
+                  Descricao
+                  <textarea name="description"></textarea>
+                </label>
+                <label>
+                  Status
+                  <select name="isActive">
+                    <option value="true">Ativa</option>
+                    <option value="false">Inativa</option>
+                  </select>
+                </label>
+              </form>
+              <div class="list" data-list="classes"></div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </section>
+
+    <script src="manager.js"></script>
+  </body>
+</html>

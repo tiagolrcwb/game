@@ -5,6 +5,8 @@ const token = localStorage.getItem('authToken');
 const username = localStorage.getItem('username');
 const usernameElement = document.querySelector('[data-username]');
 const logoutButton = document.querySelector('[data-logout]');
+const gameTitleElement = document.querySelector('[data-game-title]');
+const connectionStatusElement = document.querySelector('[data-connection-status]');
 
 if (!token) {
   window.location.href = '/';
@@ -23,28 +25,39 @@ if (logoutButton) {
 }
 
 const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const socket = new WebSocket(`${socketProtocol}//${window.location.host}?token=${encodeURIComponent(token)}`);
+const socketUrl = `${socketProtocol}//${window.location.host}?token=${encodeURIComponent(token)}`;
 
 const players = new Map();
 const pressedKeys = new Set();
 
 const PLAYER_SIZE = 24;
-const DEFAULT_WORLD_WIDTH = 3200;
-const DEFAULT_WORLD_HEIGHT = 3200;
-const GRID_SIZE = 32;
 const BACKGROUND_COLOR = '#111217';
-const GRID_COLOR = 'rgba(185, 139, 87, 0.08)';
 const GRID_LABEL_COLOR = 'rgba(227, 218, 200, 0.58)';
-const ACTIVE_CELL_COLOR = 'rgba(185, 139, 87, 0.18)';
-const ACTIVE_CELL_BORDER_COLOR = 'rgba(230, 186, 118, 0.74)';
 const WORLD_BORDER_COLOR = 'rgba(185, 139, 87, 0.28)';
 const PLAYER_SKIN_COLOR = '#c9a06d';
 const PLAYER_CLOAK_COLOR = '#5f2630';
 const PLAYER_ARMOR_COLOR = '#8f8270';
 const PLAYER_OUTLINE_COLOR = '#1b1110';
 const PLAYER_STEEL_COLOR = '#c3c7bf';
-const SPRITE_DRAW_SIZE = 64;
 const DEFAULT_CHARACTER_DIRECTION = 'south';
+const DEFAULT_WORLD = {
+  width: 32000,
+  height: 32000,
+  widthCells: 1000,
+  heightCells: 1000,
+  cellSize: 32,
+  characterSize: 64,
+  backgroundColor: '#15161d',
+  gridColor: 'rgba(185, 139, 87, 0.08)',
+  mapId: 1,
+  mapName: 'Mapa Inicial',
+  exits: {
+    north: null,
+    east: null,
+    south: null,
+    west: null,
+  },
+};
 const CHARACTER_SPRITE_SOURCES = {
   north: '/assets/char/rotations/north.png',
   'north-east': '/assets/char/rotations/north-east.png',
@@ -69,38 +82,114 @@ const characterSprites = Object.fromEntries(
   }),
 );
 let lastSentDirection = { dx: 0, dy: 0 };
-let world = {
-  width: DEFAULT_WORLD_WIDTH,
-  height: DEFAULT_WORLD_HEIGHT,
-};
+let world = { ...DEFAULT_WORLD };
 let camera = { x: 0, y: 0 };
+let socket = null;
+let heartbeatId = null;
+let reconnectId = null;
+let reconnectAttempts = 0;
 
-socket.addEventListener('open', () => {
-  console.log('Connected to game server.');
-});
+connectSocket();
 
-socket.addEventListener('message', (event) => {
-  const message = JSON.parse(event.data);
+function connectSocket() {
+  clearTimeout(reconnectId);
+  setConnectionStatus('Conectando', true);
 
-  if (message.type === 'state') {
-    if (message.world) {
-      world = {
-        width: Number(message.world.width) || DEFAULT_WORLD_WIDTH,
-        height: Number(message.world.height) || DEFAULT_WORLD_HEIGHT,
-      };
+  socket = new WebSocket(socketUrl);
+
+  socket.addEventListener('open', () => {
+    reconnectAttempts = 0;
+    lastSentDirection = { dx: 0, dy: 0 };
+    setConnectionStatus('Online', false);
+    startHeartbeat();
+    sendMovementIntent();
+    console.log('Connected to game server.');
+  });
+
+  socket.addEventListener('message', (event) => {
+    const message = JSON.parse(event.data);
+
+    if (message.type === 'state') {
+      applyStateMessage(message);
     }
+  });
 
-    players.clear();
+  socket.addEventListener('close', () => {
+    stopHeartbeat();
+    scheduleReconnect();
+    console.log('Disconnected from game server.');
+  });
 
-    for (const player of message.players) {
-      players.set(player.id, player);
+  socket.addEventListener('error', () => {
+    setConnectionStatus('Instavel', true);
+  });
+}
+
+function applyStateMessage(message) {
+  if (message.game?.name) {
+    document.title = `Jogo - ${message.game.name}`;
+
+    if (gameTitleElement) {
+      gameTitleElement.textContent = message.game.name;
     }
   }
-});
 
-socket.addEventListener('close', () => {
-  console.log('Disconnected from game server.');
-});
+  if (message.world) {
+    world = {
+      ...DEFAULT_WORLD,
+      ...message.world,
+      width: Number(message.world.width) || DEFAULT_WORLD.width,
+      height: Number(message.world.height) || DEFAULT_WORLD.height,
+      widthCells: Number(message.world.widthCells) || DEFAULT_WORLD.widthCells,
+      heightCells: Number(message.world.heightCells) || DEFAULT_WORLD.heightCells,
+      cellSize: Number(message.world.cellSize) || DEFAULT_WORLD.cellSize,
+      characterSize: Number(message.world.characterSize) || DEFAULT_WORLD.characterSize,
+    };
+  }
+
+  players.clear();
+
+  for (const player of message.players) {
+    players.set(player.id, player);
+  }
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatId = setInterval(() => {
+    sendSocketMessage({ type: 'ping', at: Date.now() });
+  }, 15000);
+}
+
+function stopHeartbeat() {
+  clearInterval(heartbeatId);
+  heartbeatId = null;
+}
+
+function scheduleReconnect() {
+  setConnectionStatus('Reconectando', true);
+  const delay = Math.min(12000, 1000 * 2 ** reconnectAttempts);
+  reconnectAttempts += 1;
+  reconnectId = setTimeout(connectSocket, delay);
+}
+
+function sendSocketMessage(message) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+
+  socket.send(JSON.stringify(message));
+  return true;
+}
+
+function setConnectionStatus(text, isOffline) {
+  if (!connectionStatusElement) {
+    return;
+  }
+
+  connectionStatusElement.textContent = text;
+  connectionStatusElement.classList.toggle('offline', isOffline);
+}
 
 window.addEventListener('keydown', (event) => {
   if (isMovementKey(event.key)) {
@@ -133,14 +222,14 @@ function getMovementDirection() {
 }
 
 function sendMovementIntent() {
-  if (socket.readyState !== WebSocket.OPEN) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
     return;
   }
 
   const { dx, dy } = getMovementDirection();
 
   if (dx !== 0 || dy !== 0 || dx !== lastSentDirection.dx || dy !== lastSentDirection.dy) {
-    socket.send(JSON.stringify({ type: 'move', dx, dy }));
+    sendSocketMessage({ type: 'move', dx, dy });
     lastSentDirection = { dx, dy };
   }
 }
@@ -192,27 +281,25 @@ function renderBackground() {
   context.save();
   context.translate(-camera.x, -camera.y);
 
-  context.fillStyle = '#15161d';
+  context.fillStyle = world.backgroundColor;
   context.fillRect(0, 0, world.width, world.height);
 
-  renderActiveCell();
-
-  context.strokeStyle = GRID_COLOR;
+  context.strokeStyle = world.gridColor;
   context.lineWidth = 1;
 
-  const firstGridX = Math.floor(camera.x / GRID_SIZE) * GRID_SIZE;
-  const lastGridX = Math.min(world.width, camera.x + canvas.width + GRID_SIZE);
-  const firstGridY = Math.floor(camera.y / GRID_SIZE) * GRID_SIZE;
-  const lastGridY = Math.min(world.height, camera.y + canvas.height + GRID_SIZE);
+  const firstGridX = Math.floor(camera.x / world.cellSize) * world.cellSize;
+  const lastGridX = Math.min(world.width, camera.x + canvas.width + world.cellSize);
+  const firstGridY = Math.floor(camera.y / world.cellSize) * world.cellSize;
+  const lastGridY = Math.min(world.height, camera.y + canvas.height + world.cellSize);
 
-  for (let x = firstGridX; x <= lastGridX; x += GRID_SIZE) {
+  for (let x = firstGridX; x <= lastGridX; x += world.cellSize) {
     context.beginPath();
     context.moveTo(x, 0);
     context.lineTo(x, world.height);
     context.stroke();
   }
 
-  for (let y = firstGridY; y <= lastGridY; y += GRID_SIZE) {
+  for (let y = firstGridY; y <= lastGridY; y += world.cellSize) {
     context.beginPath();
     context.moveTo(firstGridX, y);
     context.lineTo(lastGridX, y);
@@ -227,25 +314,6 @@ function renderBackground() {
   renderActiveCellLabel();
 }
 
-function renderActiveCell() {
-  const target = getCameraTarget();
-
-  if (!target) {
-    return;
-  }
-
-  const { column, row } = getPlayerCell(target);
-  const x = column * GRID_SIZE;
-  const y = row * GRID_SIZE;
-
-  context.fillStyle = ACTIVE_CELL_COLOR;
-  context.fillRect(x, y, GRID_SIZE, GRID_SIZE);
-
-  context.strokeStyle = ACTIVE_CELL_BORDER_COLOR;
-  context.lineWidth = 2;
-  context.strokeRect(x + 1, y + 1, GRID_SIZE - 2, GRID_SIZE - 2);
-}
-
 function renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY) {
   context.save();
   context.font = '11px Arial';
@@ -253,15 +321,15 @@ function renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY) {
   context.textAlign = 'left';
   context.textBaseline = 'top';
 
-  for (let x = firstGridX; x <= lastGridX; x += GRID_SIZE) {
-    const column = Math.floor(x / GRID_SIZE) + 1;
+  for (let x = firstGridX; x <= lastGridX; x += world.cellSize) {
+    const column = Math.floor(x / world.cellSize) + 1;
     context.fillText(String(column), Math.round(x - camera.x + 4), 4);
   }
 
   context.textAlign = 'right';
 
-  for (let y = firstGridY; y <= lastGridY; y += GRID_SIZE) {
-    const row = Math.floor(y / GRID_SIZE) + 1;
+  for (let y = firstGridY; y <= lastGridY; y += world.cellSize) {
+    const row = Math.floor(y / world.cellSize) + 1;
     context.fillText(String(row), 28, Math.round(y - camera.y + 4));
   }
 
@@ -293,8 +361,8 @@ function renderActiveCellLabel() {
 
 function getPlayerCell(player) {
   return {
-    column: clamp(Math.floor((player.x + PLAYER_SIZE / 2) / GRID_SIZE), 0, Math.ceil(world.width / GRID_SIZE) - 1),
-    row: clamp(Math.floor((player.y + PLAYER_SIZE / 2) / GRID_SIZE), 0, Math.ceil(world.height / GRID_SIZE) - 1),
+    column: clamp(Math.floor((player.x + PLAYER_SIZE / 2) / world.cellSize), 0, world.widthCells - 1),
+    row: clamp(Math.floor((player.y + PLAYER_SIZE / 2) / world.cellSize), 0, world.heightCells - 1),
   };
 }
 
@@ -325,10 +393,10 @@ function getScreenPlayer(player) {
 
 function isPlayerVisible(player) {
   return (
-    player.x > -SPRITE_DRAW_SIZE &&
-    player.x < canvas.width + SPRITE_DRAW_SIZE &&
-    player.y > -SPRITE_DRAW_SIZE &&
-    player.y < canvas.height + SPRITE_DRAW_SIZE
+    player.x > -world.characterSize &&
+    player.x < canvas.width + world.characterSize &&
+    player.y > -world.characterSize &&
+    player.y < canvas.height + world.characterSize
   );
 }
 
@@ -358,16 +426,16 @@ function renderSpriteCharacter(player) {
   context.fillRect(player.x - 7, player.y + PLAYER_SIZE / 2 + 9, PLAYER_SIZE + 14, 6);
 
   context.save();
-  context.drawImage(sprite, drawX, drawY, SPRITE_DRAW_SIZE, SPRITE_DRAW_SIZE);
+  context.drawImage(sprite, drawX, drawY, world.characterSize, world.characterSize);
   context.restore();
 }
 
 function getCharacterDrawX(player) {
-  return Math.round(player.x + PLAYER_SIZE / 2 - SPRITE_DRAW_SIZE / 2);
+  return Math.round(player.x + PLAYER_SIZE / 2 - world.characterSize / 2);
 }
 
 function getCharacterDrawY(player) {
-  return Math.round(player.y + PLAYER_SIZE / 2 - SPRITE_DRAW_SIZE / 2);
+  return Math.round(player.y + PLAYER_SIZE / 2 - world.characterSize / 2);
 }
 
 function getCharacterSprite(player) {

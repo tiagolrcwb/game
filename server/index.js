@@ -8,12 +8,35 @@ const mysql = require('mysql2/promise');
 const { WebSocket, WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8080;
-const WORLD_WIDTH = 3200;
-const WORLD_HEIGHT = 3200;
 const PLAYER_SIZE = 24;
 const PLAYER_SPEED = 5;
+const SOCKET_HEARTBEAT_INTERVAL = 25000;
+const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
+const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const MANAGER_TOKEN = process.env.MANAGER_TOKEN || '';
+const DEFAULT_GAME_CONFIG = {
+  gameName: 'Vigilia dos Portoes',
+  map: {
+    id: 1,
+    name: 'Mapa Inicial',
+    widthCells: 1000,
+    heightCells: 1000,
+    cellSize: 32,
+    characterSize: 64,
+    entryColumn: 500,
+    entryRow: 500,
+    backgroundColor: '#15161d',
+    gridColor: 'rgba(185, 139, 87, 0.08)',
+    exits: {
+      north: null,
+      east: null,
+      south: null,
+      west: null,
+    },
+  },
+};
 
 const db = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
@@ -29,6 +52,11 @@ const server = http.createServer(async (request, response) => {
   try {
     if (request.method === 'GET' && request.url === '/api/health') {
       await healthCheck(response);
+      return;
+    }
+
+    if (request.url.startsWith('/api/manager')) {
+      await handleManagerRequest(request, response);
       return;
     }
 
@@ -50,6 +78,23 @@ const server = http.createServer(async (request, response) => {
 
 const wss = new WebSocketServer({ server });
 const players = new Map();
+const playersByUserId = new Map();
+let gameConfig = DEFAULT_GAME_CONFIG;
+const heartbeatInterval = setInterval(() => {
+  for (const socket of wss.clients) {
+    if (!socket.isAlive) {
+      socket.terminate();
+      continue;
+    }
+
+    socket.isAlive = false;
+    socket.ping();
+  }
+}, SOCKET_HEARTBEAT_INTERVAL);
+
+wss.on('close', () => {
+  clearInterval(heartbeatInterval);
+});
 
 async function healthCheck(response) {
   try {
@@ -69,6 +114,449 @@ async function healthCheck(response) {
       code: error.code || 'UNKNOWN',
     });
   }
+}
+
+async function handleManagerRequest(request, response) {
+  if (request.method === 'POST' && request.url === '/api/manager/session') {
+    const body = await readRequestBody(request);
+
+    if (!isManagerTokenValid(body.token)) {
+      sendJson(response, 401, { error: 'Token de gerente invalido.' });
+      return;
+    }
+
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (!isManagerRequestAuthorized(request)) {
+    sendJson(response, 401, { error: 'Acesso de gerente necessario.' });
+    return;
+  }
+
+  if (request.method === 'GET' && request.url === '/api/manager/state') {
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
+  if (request.method === 'GET' && request.url === '/api/manager/migrations') {
+    sendJson(response, 200, { migrations: await getMigrations() });
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/api/manager/migrations/apply') {
+    const body = await readRequestBody(request);
+    await applyMigration(String(body.filename || ''));
+    await reloadGameConfig();
+    sendJson(response, 200, { migrations: await getMigrations() });
+    return;
+  }
+
+  if (request.method === 'PUT' && request.url === '/api/manager/settings') {
+    const body = await readRequestBody(request);
+    await saveGameSettings(body);
+    await reloadGameConfig();
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/api/manager/maps') {
+    const body = await readRequestBody(request);
+    await saveMap(body);
+    await reloadGameConfig();
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/api/manager/races') {
+    const body = await readRequestBody(request);
+    await saveTaxonomy('races', body);
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
+  if (request.method === 'POST' && request.url === '/api/manager/classes') {
+    const body = await readRequestBody(request);
+    await saveTaxonomy('character_classes', body);
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
+  sendJson(response, 404, { error: 'Rota de gerente nao encontrada.' });
+}
+
+function isManagerRequestAuthorized(request) {
+  if (!MANAGER_TOKEN) {
+    return false;
+  }
+
+  const authorization = String(request.headers.authorization || '');
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+
+  return isManagerTokenValid(token);
+}
+
+function isManagerTokenValid(token) {
+  if (!MANAGER_TOKEN || !token) {
+    return false;
+  }
+
+  const received = Buffer.from(token);
+  const expected = Buffer.from(MANAGER_TOKEN);
+
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
+
+async function getManagerState() {
+  const [settingsRows] = await db.execute(
+    'SELECT id, game_name, default_map_id FROM game_settings WHERE id = 1 LIMIT 1',
+  );
+  const [mapRows] = await db.execute(
+    `SELECT id, name, width_cells, height_cells, cell_size, character_size,
+      entry_column, entry_row, background_color, grid_color,
+      north_map_id, east_map_id, south_map_id, west_map_id
+      FROM maps ORDER BY id`,
+  );
+  const [raceRows] = await db.execute(
+    'SELECT id, name, description, is_active FROM races ORDER BY name',
+  );
+  const [classRows] = await db.execute(
+    'SELECT id, name, description, is_active FROM character_classes ORDER BY name',
+  );
+
+  const settings = settingsRows[0] || {
+    game_name: DEFAULT_GAME_CONFIG.gameName,
+    default_map_id: DEFAULT_GAME_CONFIG.map.id,
+  };
+
+  return {
+    settings: {
+      gameName: settings.game_name,
+      defaultMapId: settings.default_map_id,
+    },
+    maps: mapRows.map(mapMapRow),
+    races: raceRows.map(mapTaxonomyRow),
+    classes: classRows.map(mapTaxonomyRow),
+  };
+}
+
+async function getMigrations() {
+  await ensureMigrationsTable();
+
+  const files = getMigrationFiles();
+  const [rows] = await db.execute('SELECT filename, applied_at FROM schema_migrations ORDER BY filename');
+  const applied = new Map(rows.map((row) => [row.filename, row.applied_at]));
+
+  return files.map((filename) => ({
+    filename,
+    applied: applied.has(filename),
+    appliedAt: applied.get(filename) || null,
+  }));
+}
+
+async function applyMigration(filename) {
+  await ensureMigrationsTable();
+
+  if (!getMigrationFiles().includes(filename)) {
+    throw Object.assign(new Error('Migration nao encontrada.'), { statusCode: 404 });
+  }
+
+  const [existing] = await db.execute(
+    'SELECT id FROM schema_migrations WHERE filename = ? LIMIT 1',
+    [filename],
+  );
+
+  if (existing[0]) {
+    return;
+  }
+
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, filename), 'utf8');
+  const statements = splitSqlStatements(sql);
+
+  for (const statement of statements) {
+    try {
+      await db.query(statement);
+    } catch (error) {
+      if (!isIgnorableMigrationError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  await db.execute('INSERT INTO schema_migrations (filename) VALUES (?)', [filename]);
+}
+
+function isIgnorableMigrationError(error) {
+  return ['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME'].includes(error.code);
+}
+
+async function ensureMigrationsTable() {
+  await db.execute(
+    `CREATE TABLE IF NOT EXISTS schema_migrations (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+      filename VARCHAR(190) NOT NULL,
+      applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY schema_migrations_filename_unique (filename)
+    ) ENGINE=InnoDB
+      DEFAULT CHARSET=utf8mb4
+      COLLATE=utf8mb4_unicode_ci`,
+  );
+}
+
+function getMigrationFiles() {
+  if (!fs.existsSync(MIGRATIONS_DIR)) {
+    return [];
+  }
+
+  return fs.readdirSync(MIGRATIONS_DIR)
+    .filter((filename) => filename.endsWith('.sql'))
+    .sort();
+}
+
+function splitSqlStatements(sql) {
+  return sql
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+}
+
+async function saveGameSettings(body) {
+  const gameName = normalizeText(body.gameName, 3, 80);
+  const defaultMapId = toPositiveInt(body.defaultMapId, 'Mapa inicial invalido.');
+  await ensureMapIdsExist([defaultMapId]);
+
+  await db.execute(
+    `INSERT INTO game_settings (id, game_name, default_map_id)
+      VALUES (1, ?, ?)
+      ON DUPLICATE KEY UPDATE game_name = VALUES(game_name), default_map_id = VALUES(default_map_id)`,
+    [gameName, defaultMapId],
+  );
+}
+
+async function saveMap(body) {
+  const id = body.id ? toPositiveInt(body.id, 'Mapa invalido.') : null;
+  const widthCells = toBoundedInt(body.widthCells, 10, 5000, 'Largura do mapa invalida.');
+  const heightCells = toBoundedInt(body.heightCells, 10, 5000, 'Altura do mapa invalida.');
+  const map = {
+    name: normalizeText(body.name, 3, 80),
+    widthCells,
+    heightCells,
+    cellSize: toBoundedInt(body.cellSize, 8, 128, 'Tamanho da celula invalido.'),
+    characterSize: toBoundedInt(body.characterSize, 16, 256, 'Tamanho do personagem invalido.'),
+    entryColumn: toBoundedInt(body.entryColumn, 1, widthCells, 'Coluna de entrada invalida.'),
+    entryRow: toBoundedInt(body.entryRow, 1, heightCells, 'Linha de entrada invalida.'),
+    backgroundColor: normalizeColor(body.backgroundColor, '#15161d'),
+    gridColor: normalizeText(body.gridColor || 'rgba(185, 139, 87, 0.08)', 3, 40),
+    northMapId: nullablePositiveInt(body.northMapId),
+    eastMapId: nullablePositiveInt(body.eastMapId),
+    southMapId: nullablePositiveInt(body.southMapId),
+    westMapId: nullablePositiveInt(body.westMapId),
+  };
+  await ensureMapIdsExist([map.northMapId, map.eastMapId, map.southMapId, map.westMapId].filter(Boolean));
+
+  if (id) {
+    await db.execute(
+      `UPDATE maps
+        SET name = ?, width_cells = ?, height_cells = ?, cell_size = ?, character_size = ?,
+          entry_column = ?, entry_row = ?,
+          background_color = ?, grid_color = ?, north_map_id = ?, east_map_id = ?,
+          south_map_id = ?, west_map_id = ?
+        WHERE id = ?`,
+      [
+        map.name,
+        map.widthCells,
+        map.heightCells,
+        map.cellSize,
+        map.characterSize,
+        map.entryColumn,
+        map.entryRow,
+        map.backgroundColor,
+        map.gridColor,
+        map.northMapId,
+        map.eastMapId,
+        map.southMapId,
+        map.westMapId,
+        id,
+      ],
+    );
+    return;
+  }
+
+  await db.execute(
+    `INSERT INTO maps
+      (name, width_cells, height_cells, cell_size, character_size, entry_column, entry_row, background_color, grid_color,
+        north_map_id, east_map_id, south_map_id, west_map_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      map.name,
+      map.widthCells,
+      map.heightCells,
+      map.cellSize,
+      map.characterSize,
+      map.entryColumn,
+      map.entryRow,
+      map.backgroundColor,
+      map.gridColor,
+      map.northMapId,
+      map.eastMapId,
+      map.southMapId,
+      map.westMapId,
+    ],
+  );
+}
+
+async function ensureMapIdsExist(ids) {
+  if (ids.length === 0) {
+    return;
+  }
+
+  const placeholders = ids.map(() => '?').join(', ');
+  const [rows] = await db.execute(`SELECT id FROM maps WHERE id IN (${placeholders})`, ids);
+  const foundIds = new Set(rows.map((row) => row.id));
+
+  if (ids.some((id) => !foundIds.has(id))) {
+    throw Object.assign(new Error('Um dos mapas selecionados nao existe.'), { statusCode: 400 });
+  }
+}
+
+async function saveTaxonomy(table, body) {
+  if (!['races', 'character_classes'].includes(table)) {
+    throw new Error('Invalid taxonomy table.');
+  }
+
+  const id = body.id ? toPositiveInt(body.id, 'Cadastro invalido.') : null;
+  const name = normalizeText(body.name, 2, 60);
+  const description = String(body.description || '').trim().slice(0, 1200);
+  const isActive = body.isActive === false || body.isActive === 'false' ? 0 : 1;
+
+  if (id) {
+    await db.execute(
+      `UPDATE ${table} SET name = ?, description = ?, is_active = ? WHERE id = ?`,
+      [name, description, isActive, id],
+    );
+    return;
+  }
+
+  await db.execute(
+    `INSERT INTO ${table} (name, description, is_active)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE description = VALUES(description), is_active = VALUES(is_active)`,
+    [name, description, isActive],
+  );
+}
+
+function mapMapRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    widthCells: row.width_cells,
+    heightCells: row.height_cells,
+    cellSize: row.cell_size,
+    characterSize: row.character_size,
+    entryColumn: row.entry_column,
+    entryRow: row.entry_row,
+    backgroundColor: row.background_color,
+    gridColor: row.grid_color,
+    exits: {
+      north: row.north_map_id,
+      east: row.east_map_id,
+      south: row.south_map_id,
+      west: row.west_map_id,
+    },
+  };
+}
+
+function mapTaxonomyRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    isActive: Boolean(row.is_active),
+  };
+}
+
+async function reloadGameConfig() {
+  try {
+    const [rows] = await db.execute(
+      `SELECT gs.game_name, m.id, m.name, m.width_cells, m.height_cells, m.cell_size,
+        m.character_size, m.entry_column, m.entry_row, m.background_color, m.grid_color, m.north_map_id,
+        m.east_map_id, m.south_map_id, m.west_map_id
+        FROM game_settings gs
+        JOIN maps m ON m.id = gs.default_map_id
+        WHERE gs.id = 1
+        LIMIT 1`,
+    );
+
+    if (!rows[0]) {
+      gameConfig = DEFAULT_GAME_CONFIG;
+      return;
+    }
+
+    gameConfig = {
+      gameName: rows[0].game_name,
+      map: mapMapRow(rows[0]),
+    };
+  } catch (error) {
+    console.warn('Using fallback game config:', error.code || error.message);
+    gameConfig = DEFAULT_GAME_CONFIG;
+  }
+}
+
+function getWorldWidth() {
+  return gameConfig.map.widthCells * gameConfig.map.cellSize;
+}
+
+function getWorldHeight() {
+  return gameConfig.map.heightCells * gameConfig.map.cellSize;
+}
+
+function normalizeText(value, minLength, maxLength) {
+  const text = String(value || '').trim();
+
+  if (text.length < minLength || text.length > maxLength) {
+    throw Object.assign(new Error('Texto invalido.'), { statusCode: 400 });
+  }
+
+  return text;
+}
+
+function normalizeColor(value, fallback) {
+  const color = String(value || fallback).trim();
+
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
+    throw Object.assign(new Error('Cor invalida.'), { statusCode: 400 });
+  }
+
+  return color;
+}
+
+function toPositiveInt(value, message) {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number <= 0) {
+    throw Object.assign(new Error(message), { statusCode: 400 });
+  }
+
+  return number;
+}
+
+function toBoundedInt(value, min, max, message) {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw Object.assign(new Error(message), { statusCode: 400 });
+  }
+
+  return number;
+}
+
+function nullablePositiveInt(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  return toPositiveInt(value, 'Mapa de saida invalido.');
 }
 
 async function register(request, response) {
@@ -200,6 +688,11 @@ function handleUnexpectedError(error, response) {
     return;
   }
 
+  if (error.statusCode) {
+    sendJson(response, error.statusCode, { error: error.message });
+    return;
+  }
+
   if (['ECONNREFUSED', 'ER_ACCESS_DENIED_ERROR', 'ENOTFOUND'].includes(error.code)) {
     sendJson(response, 500, { error: 'Nao foi possivel conectar ao banco de dados.' });
     return;
@@ -243,14 +736,62 @@ function getContentType(filePath) {
 }
 
 function createPlayer(id, user) {
+  const spawn = getMapEntryPosition();
+
   return {
     id,
     userId: user.id,
     username: user.username,
-    x: Math.floor(Math.random() * (WORLD_WIDTH - PLAYER_SIZE)),
-    y: Math.floor(Math.random() * (WORLD_HEIGHT - PLAYER_SIZE)),
+    mapId: gameConfig.map.id,
+    x: spawn.x,
+    y: spawn.y,
     direction: 'south',
     isMoving: false,
+    disconnectedAt: null,
+    removalTimer: null,
+  };
+}
+
+function getOrCreatePlayer(socketId, user) {
+  const existing = playersByUserId.get(user.id);
+
+  if (existing) {
+    clearTimeout(existing.removalTimer);
+    existing.removalTimer = null;
+    existing.disconnectedAt = null;
+    existing.id = socketId;
+    players.set(socketId, existing);
+    return existing;
+  }
+
+  const player = createPlayer(socketId, user);
+  playersByUserId.set(user.id, player);
+  players.set(socketId, player);
+  return player;
+}
+
+function schedulePlayerRemoval(player, socketId) {
+  player.isMoving = false;
+  player.disconnectedAt = Date.now();
+  players.delete(socketId);
+
+  clearTimeout(player.removalTimer);
+  player.removalTimer = setTimeout(() => {
+    if (player.disconnectedAt) {
+      playersByUserId.delete(player.userId);
+      broadcastGameState();
+    }
+  }, PLAYER_DISCONNECT_GRACE_MS);
+}
+
+function getMapEntryPosition() {
+  const cellSize = gameConfig.map.cellSize;
+  const column = clamp(gameConfig.map.entryColumn || 1, 1, gameConfig.map.widthCells);
+  const row = clamp(gameConfig.map.entryRow || 1, 1, gameConfig.map.heightCells);
+
+  return {
+    x: clamp((column - 0.5) * cellSize - PLAYER_SIZE / 2, 0, getWorldWidth() - PLAYER_SIZE),
+    y: clamp((row - 0.5) * cellSize - PLAYER_SIZE / 2, 0, getWorldHeight() - PLAYER_SIZE),
   };
 }
 
@@ -261,9 +802,23 @@ function clamp(value, min, max) {
 function broadcastGameState() {
   const message = JSON.stringify({
     type: 'state',
+    game: {
+      name: gameConfig.gameName,
+    },
     world: {
-      width: WORLD_WIDTH,
-      height: WORLD_HEIGHT,
+      width: getWorldWidth(),
+      height: getWorldHeight(),
+      widthCells: gameConfig.map.widthCells,
+      heightCells: gameConfig.map.heightCells,
+      cellSize: gameConfig.map.cellSize,
+      characterSize: gameConfig.map.characterSize,
+      entryColumn: gameConfig.map.entryColumn,
+      entryRow: gameConfig.map.entryRow,
+      backgroundColor: gameConfig.map.backgroundColor,
+      gridColor: gameConfig.map.gridColor,
+      mapId: gameConfig.map.id,
+      mapName: gameConfig.map.name,
+      exits: gameConfig.map.exits,
     },
     players: Array.from(players.values()),
   });
@@ -285,8 +840,8 @@ function handleMove(player, dx, dy) {
     player.direction = getPlayerDirection(normalizedDx, normalizedDy);
   }
 
-  player.x = clamp(player.x + normalizedDx * PLAYER_SPEED, 0, WORLD_WIDTH - PLAYER_SIZE);
-  player.y = clamp(player.y + normalizedDy * PLAYER_SPEED, 0, WORLD_HEIGHT - PLAYER_SIZE);
+  player.x = clamp(player.x + normalizedDx * PLAYER_SPEED, 0, getWorldWidth() - PLAYER_SIZE);
+  player.y = clamp(player.y + normalizedDy * PLAYER_SPEED, 0, getWorldHeight() - PLAYER_SIZE);
 }
 
 function getPlayerDirection(dx, dy) {
@@ -312,19 +867,29 @@ wss.on('connection', (socket, request) => {
   }
 
   const playerId = crypto.randomUUID();
-  const player = createPlayer(playerId, user);
+  const player = getOrCreatePlayer(playerId, user);
+  socket.isAlive = true;
 
-  players.set(playerId, player);
   console.log(`Player connected: ${user.username} (${playerId})`);
   broadcastGameState();
+
+  socket.on('pong', () => {
+    socket.isAlive = true;
+  });
 
   socket.on('message', (rawMessage) => {
     try {
       const message = JSON.parse(rawMessage.toString());
+      socket.isAlive = true;
 
       if (message.type === 'move') {
         handleMove(player, message.dx, message.dy);
         broadcastGameState();
+        return;
+      }
+
+      if (message.type === 'ping') {
+        socket.send(JSON.stringify({ type: 'pong', at: Date.now() }));
       }
     } catch (error) {
       console.warn(`Invalid message from ${user.username}:`, error.message);
@@ -332,13 +897,15 @@ wss.on('connection', (socket, request) => {
   });
 
   socket.on('close', () => {
-    players.delete(playerId);
+    schedulePlayerRemoval(player, playerId);
     console.log(`Player disconnected: ${user.username} (${playerId})`);
     broadcastGameState();
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Client running on http://localhost:${PORT}`);
-  console.log(`WebSocket server running on ws://localhost:${PORT}`);
+reloadGameConfig().finally(() => {
+  server.listen(PORT, () => {
+    console.log(`Client running on http://localhost:${PORT}`);
+    console.log(`WebSocket server running on ws://localhost:${PORT}`);
+  });
 });

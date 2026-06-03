@@ -54,6 +54,15 @@
         font-size: 14px;
       }
 
+      .connection-status {
+        color: #8fbf91;
+        font-size: 12px;
+      }
+
+      .connection-status.offline {
+        color: #d77272;
+      }
+
       button {
         border: 1px solid #3b332b;
         background: #171820;
@@ -76,8 +85,9 @@
   <body>
     <main class="game-shell">
       <header class="game-header">
-        <h1>Vig&iacute;lia dos Port&otilde;es</h1>
+        <h1 data-game-title>Vig&iacute;lia dos Port&otilde;es</h1>
         <div class="user-area">
+          <span class="connection-status" data-connection-status>Conectando</span>
           <span data-username></span>
           <button type="button" data-logout>Sair</button>
         </div>

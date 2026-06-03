@@ -5,7 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "check": "node --check app.js && node --check server/index.js && node --check client/auth.js && node --check client/game.js",
+    "check": "node --check app.js && node --check server/index.js && node --check client/auth.js && node --check client/game.js && node --check client/manager.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "engines": {
