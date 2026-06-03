@@ -108,6 +108,10 @@ let heartbeatId = null;
 let reconnectId = null;
 let reconnectAttempts = 0;
 
+resizeCanvasToViewport();
+window.addEventListener('resize', resizeCanvasToViewport);
+window.visualViewport?.addEventListener('resize', resizeCanvasToViewport);
+
 connectSocket();
 loadGameConfig();
 setInterval(loadGameConfig, 7000);
@@ -269,6 +273,9 @@ canvas.addEventListener('pointerdown', (event) => {
     return;
   }
 
+  event.preventDefault();
+  canvas.setPointerCapture?.(event.pointerId);
+
   const cell = getClickedCell(event);
 
   if (!cell || isBlockedClickTarget(cell)) {
@@ -376,6 +383,24 @@ function getLocalPlayer() {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function resizeCanvasToViewport() {
+  const rect = canvas.getBoundingClientRect();
+  const nextWidth = Math.max(320, Math.round(rect.width || window.innerWidth || canvas.width));
+  const nextHeight = Math.max(240, Math.round(rect.height || window.innerHeight || canvas.height));
+
+  if (canvas.width === nextWidth && canvas.height === nextHeight) {
+    return;
+  }
+
+  canvas.width = nextWidth;
+  canvas.height = nextHeight;
+  context.imageSmoothingEnabled = false;
+  camera = {
+    x: clamp(camera.x, 0, Math.max(0, world.width - canvas.width)),
+    y: clamp(camera.y, 0, Math.max(0, world.height - canvas.height)),
+  };
 }
 
 function renderBackground() {
@@ -499,8 +524,10 @@ function getPlayerCell(player) {
 
 function getClickedCell(event) {
   const rect = canvas.getBoundingClientRect();
-  const worldX = event.clientX - rect.left + camera.x;
-  const worldY = event.clientY - rect.top + camera.y;
+  const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+  const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+  const worldX = (event.clientX - rect.left) * scaleX + camera.x;
+  const worldY = (event.clientY - rect.top) * scaleY + camera.y;
   const column = Math.floor(worldX / world.cellSize);
   const row = Math.floor(worldY / world.cellSize);
 

@@ -2,48 +2,71 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Jogo</title>
     <style>
       * {
         box-sizing: border-box;
       }
 
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+
       body {
         margin: 0;
         min-height: 100vh;
+        min-height: 100dvh;
         display: flex;
         align-items: center;
         justify-content: center;
-        background:
-          radial-gradient(circle at center, rgba(80, 70, 60, 0.14), transparent 45%),
-          linear-gradient(135deg, #08090d 0%, #11131a 55%, #050608 100%);
+        background: #050608;
         color: #d8d0bd;
         font-family: Arial, Helvetica, sans-serif;
+        overscroll-behavior: none;
       }
 
       .game-shell {
-        width: min(1180px, calc(100vw - 32px));
-        padding: 18px;
-        border: 1px solid #2f2a25;
-        background: rgba(8, 9, 13, 0.82);
-        box-shadow: 0 0 40px rgba(0, 0, 0, 0.75);
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        background: #050608;
       }
 
       .game-header {
+        position: absolute;
+        top: calc(env(safe-area-inset-top) + 12px);
+        left: calc(env(safe-area-inset-left) + 12px);
+        right: calc(env(safe-area-inset-right) + 12px);
+        z-index: 2;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        margin-bottom: 12px;
+        min-height: 42px;
+        padding: 8px 10px;
+        border: 1px solid rgba(185, 139, 87, 0.34);
+        background: rgba(8, 9, 13, 0.76);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+        pointer-events: none;
       }
 
       h1 {
         margin: 0;
         font-size: 18px;
-        letter-spacing: 2px;
+        letter-spacing: 0;
         text-transform: uppercase;
         color: #b98b57;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .user-area {
@@ -52,6 +75,8 @@
         gap: 10px;
         color: #b9ad9a;
         font-size: 14px;
+        min-width: 0;
+        pointer-events: auto;
       }
 
       .connection-status {
@@ -69,16 +94,47 @@
         color: #e3dac8;
         padding: 8px 10px;
         cursor: pointer;
+        flex: 0 0 auto;
       }
 
       canvas {
+        position: absolute;
+        inset: 0;
         width: 100%;
-        max-width: 1140px;
-        aspect-ratio: 19 / 10;
+        height: 100%;
         display: block;
-        border: 2px solid #3b332b;
         background: #111217;
         image-rendering: pixelated;
+        touch-action: none;
+        user-select: none;
+      }
+
+      @media (max-width: 720px) {
+        .game-header {
+          top: calc(env(safe-area-inset-top) + 8px);
+          left: calc(env(safe-area-inset-left) + 8px);
+          right: calc(env(safe-area-inset-right) + 8px);
+          gap: 8px;
+          min-height: 38px;
+          padding: 6px 8px;
+        }
+
+        h1 {
+          font-size: 13px;
+        }
+
+        .user-area {
+          gap: 8px;
+          font-size: 12px;
+        }
+
+        [data-username] {
+          display: none;
+        }
+
+        button {
+          padding: 7px 9px;
+        }
       }
     </style>
   </head>
@@ -96,6 +152,6 @@
       <canvas id="gameCanvas" width="1140" height="600"></canvas>
     </main>
 
-    <script src="game.js?v=2026-06-03-point-click-1"></script>
+    <script src="game.js?v=2026-06-03-fullscreen-1"></script>
   </body>
 </html>
