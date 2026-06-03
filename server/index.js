@@ -12,7 +12,7 @@ const PLAYER_SIZE = 24;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 12 * 1024 * 1024;
-const APP_VERSION = '2026-06-03-map-runtime-4';
+const APP_VERSION = '2026-06-03-cell-params-1';
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
 const MAP_ASSETS_DIR = path.join(CLIENT_DIR, 'assets', 'maps');
@@ -586,8 +586,8 @@ function createDefaultMapData(map) {
     heightCells: map.heightCells,
     blockedCells: [],
     teleportPoints: [],
-    speedAreas: [],
-    levelCurve: createDefaultLevelCurve(map),
+    speedCells: [],
+    levelCells: [],
   };
 }
 
@@ -631,9 +631,8 @@ function normalizeMapData(data, map) {
   const teleportPoints = Array.isArray(data.teleportPoints)
     ? data.teleportPoints.map((point) => normalizeTeleportPoint(point, map)).filter(Boolean)
     : [];
-  const speedAreas = Array.isArray(data.speedAreas)
-    ? data.speedAreas.map((area) => normalizeSpeedArea(area, map)).filter(Boolean)
-    : [];
+  const speedCells = normalizeSpeedCells(data, map);
+  const levelCells = normalizeLevelCells(data, map);
 
   return {
     version: 1,
@@ -641,60 +640,110 @@ function normalizeMapData(data, map) {
     heightCells: map.heightCells,
     blockedCells,
     teleportPoints,
-    speedAreas,
-    levelCurve: normalizeLevelCurve(data.levelCurve, map),
+    speedCells,
+    levelCells,
   };
 }
 
-function normalizeSpeedArea(area, map) {
-  const column = Number(area?.column);
-  const row = Number(area?.row);
-  const width = Number(area?.width);
-  const height = Number(area?.height);
-  const multiplier = Number(area?.multiplier);
+function normalizeSpeedCells(data, map) {
+  const cells = Array.isArray(data.speedCells)
+    ? data.speedCells.map((cell) => normalizeSpeedCell(cell, map)).filter(Boolean)
+    : [];
+  const areas = Array.isArray(data.speedAreas) ? data.speedAreas : [];
+
+  for (const area of areas) {
+    const column = Number(area?.column);
+    const row = Number(area?.row);
+    const width = Number(area?.width);
+    const height = Number(area?.height);
+
+    if (
+      !Number.isInteger(column) ||
+      !Number.isInteger(row) ||
+      !Number.isInteger(width) ||
+      !Number.isInteger(height) ||
+      width < 1 ||
+      height < 1
+    ) {
+      continue;
+    }
+
+    for (let offsetRow = 0; offsetRow < height; offsetRow += 1) {
+      for (let offsetColumn = 0; offsetColumn < width; offsetColumn += 1) {
+        const cell = normalizeSpeedCell({
+          column: column + offsetColumn,
+          row: row + offsetRow,
+          multiplier: area.multiplier,
+        }, map);
+
+        if (cell) {
+          cells.push(cell);
+        }
+      }
+    }
+  }
+
+  const byCell = new Map();
+  for (const cell of cells) {
+    byCell.set(getCellKey(cell.column, cell.row), cell);
+  }
+
+  return [...byCell.values()];
+}
+
+function normalizeSpeedCell(cell, map) {
+  const column = Number(cell?.column);
+  const row = Number(cell?.row);
+  const multiplier = Number(cell?.multiplier);
 
   if (
     !Number.isInteger(column) ||
     !Number.isInteger(row) ||
-    !Number.isInteger(width) ||
-    !Number.isInteger(height) ||
-    width < 1 ||
-    height < 1 ||
     !isCellKeyInsideMap(`${column},${row}`, map)
   ) {
     return null;
   }
 
   return {
-    id: String(area.id || crypto.randomUUID()),
+    id: String(cell.id || crypto.randomUUID()),
     column,
     row,
-    width: clamp(width, 1, map.widthCells - column + 1),
-    height: clamp(height, 1, map.heightCells - row + 1),
     multiplier: clamp(Number.isFinite(multiplier) ? multiplier : 1, 0.2, 3),
   };
 }
 
-function createDefaultLevelCurve(map) {
-  const baseSize = Number(map.characterSize) || DEFAULT_GAME_CONFIG.map.characterSize;
+function normalizeLevelCells(data, map) {
+  const cells = Array.isArray(data.levelCells)
+    ? data.levelCells.map((cell) => normalizeLevelCell(cell, map)).filter(Boolean)
+    : [];
+  const byCell = new Map();
 
-  return [
-    Math.max(16, Math.round(baseSize * 0.8)),
-    Math.max(16, Math.round(baseSize * 0.9)),
-    Math.max(16, Math.round(baseSize)),
-    Math.max(16, Math.round(baseSize * 1.1)),
-    Math.max(16, Math.round(baseSize * 1.2)),
-  ];
+  for (const cell of cells) {
+    byCell.set(getCellKey(cell.column, cell.row), cell);
+  }
+
+  return [...byCell.values()];
 }
 
-function normalizeLevelCurve(value, map) {
-  const fallback = createDefaultLevelCurve(map);
-  const source = Array.isArray(value) ? value : [];
+function normalizeLevelCell(cell, map) {
+  const column = Number(cell?.column);
+  const row = Number(cell?.row);
+  const level = Number(cell?.level);
 
-  return fallback.map((defaultSize, index) => {
-    const size = Number(source[index]);
-    return Number.isInteger(size) && size >= 16 && size <= 256 ? size : defaultSize;
-  });
+  if (
+    !Number.isInteger(column) ||
+    !Number.isInteger(row) ||
+    !isCellKeyInsideMap(`${column},${row}`, map)
+  ) {
+    return null;
+  }
+
+  return {
+    id: String(cell.id || crypto.randomUUID()),
+    column,
+    row,
+    level: clamp(Number.isInteger(level) ? level : 3, 1, 5),
+  };
 }
 
 function normalizeCellKey(value) {
@@ -961,8 +1010,8 @@ async function register(request, response) {
       [username, passwordHash],
     );
 
-    const token = createToken({ id: result.insertId, username, level: 3 });
-    sendJson(response, 201, { token, user: { id: result.insertId, username, level: 3 } });
+    const token = createToken({ id: result.insertId, username });
+    sendJson(response, 201, { token, user: { id: result.insertId, username } });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
       sendJson(response, 409, { error: 'Esse nome de usuario ja esta em uso.' });
@@ -978,7 +1027,12 @@ async function login(request, response) {
   const username = String(body.username || '').trim();
   const password = String(body.password || '');
 
-  const user = await getLoginUser(username);
+  const [rows] = await db.execute(
+    'SELECT id, username, password_hash FROM users WHERE username = ? LIMIT 1',
+    [username],
+  );
+
+  const user = rows[0];
   const isPasswordValid = user ? await bcrypt.compare(password, user.password_hash) : false;
 
   if (!user || !isPasswordValid) {
@@ -986,29 +1040,8 @@ async function login(request, response) {
     return;
   }
 
-  const level = clamp(Number(user.level || 3), 1, 5);
-  const token = createToken({ id: user.id, username: user.username, level });
-  sendJson(response, 200, { token, user: { id: user.id, username: user.username, level } });
-}
-
-async function getLoginUser(username) {
-  try {
-    const [rows] = await db.execute(
-      'SELECT id, username, level, password_hash FROM users WHERE username = ? LIMIT 1',
-      [username],
-    );
-    return rows[0] || null;
-  } catch (error) {
-    if (error.code !== 'ER_BAD_FIELD_ERROR') {
-      throw error;
-    }
-
-    const [rows] = await db.execute(
-      'SELECT id, username, password_hash FROM users WHERE username = ? LIMIT 1',
-      [username],
-    );
-    return rows[0] ? { ...rows[0], level: 3 } : null;
-  }
+  const token = createToken({ id: user.id, username: user.username });
+  sendJson(response, 200, { token, user: { id: user.id, username: user.username } });
 }
 
 function createToken(user) {
@@ -1141,7 +1174,6 @@ function createPlayer(id, user) {
     id,
     userId: user.id,
     username: user.username,
-    level: clamp(Number(user.level || 3), 1, 5),
     mapId: map.id,
     x: spawn.x,
     y: spawn.y,
@@ -1270,8 +1302,8 @@ function createGameConfigPayload(map, mapData = createDefaultMapData(map)) {
       exits: map.exits,
       blockedCells: mapData.blockedCells,
       teleportPoints: mapData.teleportPoints,
-      speedAreas: mapData.speedAreas,
-      levelCurve: mapData.levelCurve,
+      speedCells: mapData.speedCells,
+      levelCells: mapData.levelCells,
     },
   };
 }
@@ -1311,21 +1343,12 @@ async function handleMove(player, dx, dy) {
 
 function getMovementSpeedForPlayer(player, map, mapData) {
   const cell = getCellFromPosition(player.x + PLAYER_SIZE / 2, player.y + PLAYER_SIZE / 2, map);
-  const speedArea = [...(mapData.speedAreas || [])]
+  const speedCell = [...(mapData.speedCells || [])]
     .reverse()
-    .find((area) => isCellInsideRect(cell.column, cell.row, area));
-  const multiplier = speedArea ? Number(speedArea.multiplier || 1) : 1;
+    .find((item) => item.column === cell.column && item.row === cell.row);
+  const multiplier = speedCell ? Number(speedCell.multiplier || 1) : 1;
 
   return clamp(Number(map.movementSpeed || 5) * multiplier, 0.5, 40);
-}
-
-function isCellInsideRect(column, row, rect) {
-  return (
-    column >= rect.column &&
-    column < rect.column + rect.width &&
-    row >= rect.row &&
-    row < rect.row + rect.height
-  );
 }
 
 function tryTeleportAtMapEdge(player, map) {
@@ -1387,6 +1410,10 @@ function getCellFromPosition(x, y, map) {
     column: clamp(Math.floor(x / map.cellSize) + 1, 1, map.widthCells),
     row: clamp(Math.floor(y / map.cellSize) + 1, 1, map.heightCells),
   };
+}
+
+function getCellKey(column, row) {
+  return `${column},${row}`;
 }
 
 function teleportPlayer(player, targetMapId, fromDirection) {

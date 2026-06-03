@@ -53,8 +53,8 @@ const DEFAULT_WORLD = {
   mapDataPath: '/assets/maps/data/map-1.json',
   blockedCells: [],
   teleportPoints: [],
-  speedAreas: [],
-  levelCurve: [51, 58, 64, 70, 77],
+  speedCells: [],
+  levelCells: [],
   gridColor: 'rgba(185, 139, 87, 0.08)',
   mapId: 1,
   mapName: 'Mapa Inicial',
@@ -158,8 +158,8 @@ function applyStateMessage(message) {
       movementSpeed: Number(message.world.movementSpeed) || DEFAULT_WORLD.movementSpeed,
       blockedCells: Array.isArray(message.world.blockedCells) ? message.world.blockedCells : [],
       teleportPoints: Array.isArray(message.world.teleportPoints) ? message.world.teleportPoints : [],
-      speedAreas: Array.isArray(message.world.speedAreas) ? message.world.speedAreas : [],
-      levelCurve: Array.isArray(message.world.levelCurve) ? message.world.levelCurve : DEFAULT_WORLD.levelCurve,
+      speedCells: Array.isArray(message.world.speedCells) ? message.world.speedCells : [],
+      levelCells: Array.isArray(message.world.levelCells) ? message.world.levelCells : [],
     };
 
     if (world.mapId !== previousMapId) {
@@ -448,6 +448,8 @@ function renderPlayers() {
 function getScreenPlayer(player) {
   return {
     ...player,
+    worldX: player.x,
+    worldY: player.y,
     x: player.x - camera.x,
     y: player.y - camera.y,
   };
@@ -504,9 +506,13 @@ function getCharacterDrawY(player) {
 }
 
 function getCharacterSize(player) {
-  const level = clamp(Number(player.level || 3), 1, 5);
-  const size = Number(world.levelCurve[level - 1]);
-  return Number.isFinite(size) ? size : world.characterSize;
+  const column = clamp(Math.floor(((player.worldX ?? player.x) + PLAYER_SIZE / 2) / world.cellSize) + 1, 1, world.widthCells);
+  const row = clamp(Math.floor(((player.worldY ?? player.y) + PLAYER_SIZE / 2) / world.cellSize) + 1, 1, world.heightCells);
+  const cell = world.levelCells.find((item) => item.column === column && item.row === row);
+  const level = clamp(Number(cell?.level || 3), 1, 5);
+  const scale = [0.8, 0.9, 1, 1.1, 1.2][level - 1] || 1;
+
+  return Math.round(world.characterSize * scale);
 }
 
 function getCharacterSprite(player) {
