@@ -102,6 +102,7 @@ const raceSpriteSets = new Map();
 let lastSentDirection = { dx: 0, dy: 0 };
 let world = { ...DEFAULT_WORLD };
 let camera = { x: 0, y: 0 };
+let clickMoveTarget = null;
 let socket = null;
 let heartbeatId = null;
 let reconnectId = null;
@@ -246,6 +247,7 @@ function setConnectionStatus(text, isOffline) {
 
 window.addEventListener('keydown', (event) => {
   if (isMovementKey(event.key)) {
+    clickMoveTarget = null;
     pressedKeys.add(event.key.toLowerCase());
     event.preventDefault();
   }
@@ -262,6 +264,26 @@ function isMovementKey(key) {
   return ['w', 'a', 's', 'd', 'arrowup', 'arrowleft', 'arrowdown', 'arrowright'].includes(key.toLowerCase());
 }
 
+canvas.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) {
+    return;
+  }
+
+  const cell = getClickedCell(event);
+
+  if (!cell || isBlockedClickTarget(cell)) {
+    clickMoveTarget = null;
+    return;
+  }
+
+  pressedKeys.clear();
+  clickMoveTarget = {
+    mapId: world.mapId,
+    column: cell.column,
+    row: cell.row,
+  };
+});
+
 function getMovementDirection() {
   let dx = 0;
   let dy = 0;
@@ -271,7 +293,32 @@ function getMovementDirection() {
   if (pressedKeys.has('w') || pressedKeys.has('arrowup')) dy -= 1;
   if (pressedKeys.has('s') || pressedKeys.has('arrowdown')) dy += 1;
 
-  return { dx, dy };
+  if (dx !== 0 || dy !== 0) {
+    return { dx, dy };
+  }
+
+  return getClickMoveDirection();
+}
+
+function getClickMoveDirection() {
+  const player = getLocalPlayer();
+
+  if (!player || !clickMoveTarget || clickMoveTarget.mapId !== world.mapId) {
+    clickMoveTarget = null;
+    return { dx: 0, dy: 0 };
+  }
+
+  const currentCell = getPlayerCell(player);
+
+  if (currentCell.column === clickMoveTarget.column && currentCell.row === clickMoveTarget.row) {
+    clickMoveTarget = null;
+    return { dx: 0, dy: 0 };
+  }
+
+  return {
+    dx: Math.sign(clickMoveTarget.column - currentCell.column),
+    dy: Math.sign(clickMoveTarget.row - currentCell.row),
+  };
 }
 
 function sendMovementIntent() {
@@ -320,7 +367,11 @@ function updateCamera() {
 }
 
 function getCameraTarget() {
-  return Array.from(players.values()).find((player) => player.username === username) || players.values().next().value;
+  return getLocalPlayer() || players.values().next().value;
+}
+
+function getLocalPlayer() {
+  return Array.from(players.values()).find((player) => player.username === username) || null;
 }
 
 function clamp(value, min, max) {
@@ -370,6 +421,7 @@ function renderBackground() {
     renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY);
     renderActiveCellLabel();
   }
+  renderClickMoveTarget();
 }
 
 function preloadBackgroundImage(source) {
@@ -443,6 +495,46 @@ function getPlayerCell(player) {
     column: clamp(Math.floor((player.x + PLAYER_SIZE / 2) / world.cellSize), 0, world.widthCells - 1),
     row: clamp(Math.floor((player.y + PLAYER_SIZE / 2) / world.cellSize), 0, world.heightCells - 1),
   };
+}
+
+function getClickedCell(event) {
+  const rect = canvas.getBoundingClientRect();
+  const worldX = event.clientX - rect.left + camera.x;
+  const worldY = event.clientY - rect.top + camera.y;
+  const column = Math.floor(worldX / world.cellSize);
+  const row = Math.floor(worldY / world.cellSize);
+
+  if (column < 0 || column >= world.widthCells || row < 0 || row >= world.heightCells) {
+    return null;
+  }
+
+  return { column, row };
+}
+
+function isBlockedClickTarget(cell) {
+  return world.blockedCells.includes(`${cell.column + 1},${cell.row + 1}`);
+}
+
+function renderClickMoveTarget() {
+  if (!clickMoveTarget || clickMoveTarget.mapId !== world.mapId) {
+    return;
+  }
+
+  const x = clickMoveTarget.column * world.cellSize - camera.x;
+  const y = clickMoveTarget.row * world.cellSize - camera.y;
+  const size = world.cellSize;
+
+  if (x + size < 0 || y + size < 0 || x > canvas.width || y > canvas.height) {
+    return;
+  }
+
+  context.save();
+  context.strokeStyle = 'rgba(96, 165, 250, 0.95)';
+  context.lineWidth = 2;
+  context.strokeRect(Math.round(x) + 2.5, Math.round(y) + 2.5, Math.max(4, size - 5), Math.max(4, size - 5));
+  context.fillStyle = 'rgba(96, 165, 250, 0.18)';
+  context.fillRect(Math.round(x) + 3, Math.round(y) + 3, Math.max(3, size - 6), Math.max(3, size - 6));
+  context.restore();
 }
 
 function renderPlayers() {

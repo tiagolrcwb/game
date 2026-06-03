@@ -129,6 +129,7 @@ settingsForm.addEventListener('submit', async (event) => {
 
 mapForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  clampMapEntryFields();
   const existingId = Number(mapForm.elements.id.value || 0);
   await save('/api/manager/maps', 'POST', formToObject(mapForm));
   selectedMapId = existingId || state.maps.at(-1)?.id || selectedMapId;
@@ -161,6 +162,8 @@ editorSaveButton.addEventListener('click', saveMapEditor);
 editorZoomInButton.addEventListener('click', () => setEditorZoom(editor.zoom * 1.25));
 editorZoomOutButton.addEventListener('click', () => setEditorZoom(editor.zoom / 1.25));
 editorBackgroundInput.addEventListener('change', uploadMapBackground);
+mapForm.elements.widthCells.addEventListener('change', clampMapEntryFields);
+mapForm.elements.heightCells.addEventListener('change', clampMapEntryFields);
 
 for (const button of editorModeButtons) {
   button.addEventListener('click', () => setEditorMode(button.dataset.editorMode));
@@ -590,16 +593,26 @@ function setDefaultMapFormValues() {
   }
 
   mapForm.elements.name.value ||= 'Novo mapa';
-  mapForm.elements.widthCells.value ||= 1000;
-  mapForm.elements.heightCells.value ||= 1000;
+  mapForm.elements.widthCells.value ||= 100;
+  mapForm.elements.heightCells.value ||= 100;
   mapForm.elements.cellSize.value ||= 16;
   mapForm.elements.characterSize.value ||= 64;
   mapForm.elements.movementSpeed.value ||= 5;
   mapForm.elements.showGrid.value ||= 'true';
   mapForm.elements.showCoordinates.value ||= 'true';
-  mapForm.elements.entryColumn.value ||= 500;
-  mapForm.elements.entryRow.value ||= 500;
+  mapForm.elements.entryColumn.value ||= Math.ceil(Number(mapForm.elements.widthCells.value || 100) / 2);
+  mapForm.elements.entryRow.value ||= Math.ceil(Number(mapForm.elements.heightCells.value || 100) / 2);
   mapForm.elements.backgroundColor.value ||= '#15161d';
+}
+
+function clampMapEntryFields() {
+  const widthCells = clamp(Number(mapForm.elements.widthCells.value || 1), 1, 5000);
+  const heightCells = clamp(Number(mapForm.elements.heightCells.value || 1), 1, 5000);
+  const entryColumn = Number(mapForm.elements.entryColumn.value || Math.ceil(widthCells / 2));
+  const entryRow = Number(mapForm.elements.entryRow.value || Math.ceil(heightCells / 2));
+
+  mapForm.elements.entryColumn.value = clamp(entryColumn, 1, widthCells);
+  mapForm.elements.entryRow.value = clamp(entryRow, 1, heightCells);
 }
 
 async function loadMapEditor(mapId) {

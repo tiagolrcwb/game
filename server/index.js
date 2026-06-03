@@ -13,7 +13,7 @@ const PLAYER_SIZE = 24;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 48 * 1024 * 1024;
-const APP_VERSION = '2026-06-03-race-sprites-1';
+const APP_VERSION = '2026-06-03-point-click-1';
 const SPEED_LEVEL_MULTIPLIERS = {
   1: 0.5,
   2: 0.75,
@@ -48,8 +48,8 @@ const DEFAULT_GAME_CONFIG = {
     cellSize: 32,
     characterSize: 64,
     movementSpeed: 5,
-    entryColumn: 500,
-    entryRow: 500,
+    entryColumn: 50,
+    entryRow: 50,
     backgroundColor: '#15161d',
     backgroundImagePath: null,
     mapDataPath: '/assets/maps/data/map-1.json',
@@ -451,6 +451,8 @@ async function saveMap(body) {
   const id = body.id ? toPositiveInt(body.id, 'Mapa invalido.') : null;
   const widthCells = toBoundedInt(body.widthCells, 10, 5000, 'Largura do mapa invalida.');
   const heightCells = toBoundedInt(body.heightCells, 10, 5000, 'Altura do mapa invalida.');
+  const entryColumn = normalizeMapEntryCell(body.entryColumn, widthCells);
+  const entryRow = normalizeMapEntryCell(body.entryRow, heightCells);
   const map = {
     name: normalizeText(body.name, 3, 80),
     widthCells,
@@ -458,8 +460,8 @@ async function saveMap(body) {
     cellSize: toBoundedInt(body.cellSize, 16, 128, 'Tamanho da celula invalido.'),
     characterSize: toBoundedInt(body.characterSize, 16, 256, 'Tamanho do personagem invalido.'),
     movementSpeed: toBoundedFloat(body.movementSpeed || 5, 1, 20, 'Velocidade de deslocamento invalida.'),
-    entryColumn: toBoundedInt(body.entryColumn, 1, widthCells, 'Coluna de entrada invalida.'),
-    entryRow: toBoundedInt(body.entryRow, 1, heightCells, 'Linha de entrada invalida.'),
+    entryColumn,
+    entryRow,
     backgroundColor: normalizeColor(body.backgroundColor, '#15161d'),
     gridColor: normalizeText(body.gridColor || 'rgba(185, 139, 87, 0.08)', 3, 40),
     showGrid: normalizeBoolean(body.showGrid, true),
@@ -1201,6 +1203,16 @@ function toBoundedFloat(value, min, max, message) {
   }
 
   return Math.round(number * 100) / 100;
+}
+
+function normalizeMapEntryCell(value, max) {
+  const number = Number(value);
+
+  if (!Number.isInteger(number) || number <= 0) {
+    return clamp(Math.ceil(max / 2), 1, max);
+  }
+
+  return clamp(number, 1, max);
 }
 
 function nullablePositiveInt(value) {
