@@ -13,7 +13,7 @@ const PLAYER_SIZE = 24;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 48 * 1024 * 1024;
-const APP_VERSION = '2026-06-03-fullscreen-1';
+const APP_VERSION = '2026-06-03-mobile-zoom-bg-1';
 const SPEED_LEVEL_MULTIPLIERS = {
   1: 0.5,
   2: 0.75,
@@ -266,6 +266,7 @@ async function handleManagerRequest(request, response) {
     const backgroundImagePath = await saveMapBackground(map.id, String(body.dataUrl || ''));
 
     await db.execute('UPDATE maps SET background_image_path = ? WHERE id = ?', [backgroundImagePath, map.id]);
+    deleteMapBackgroundFile(map.backgroundImagePath, backgroundImagePath);
     await reloadGameConfig();
     await broadcastGameState();
     sendJson(response, 200, await getManagerState());
@@ -631,7 +632,16 @@ function deleteMapAssetFiles(mapId, backgroundImagePath) {
     return;
   }
 
-  const backgroundFilePath = path.resolve(CLIENT_DIR, `.${backgroundImagePath}`);
+  deleteMapBackgroundFile(backgroundImagePath);
+}
+
+function deleteMapBackgroundFile(backgroundImagePath, keepPublicPath = null) {
+  if (!backgroundImagePath || backgroundImagePath === keepPublicPath) {
+    return;
+  }
+
+  const cleanPath = backgroundImagePath.split('?')[0];
+  const backgroundFilePath = path.resolve(CLIENT_DIR, `.${cleanPath}`);
 
   if (backgroundFilePath.startsWith(`${MAP_BACKGROUND_DIR}${path.sep}`) && fs.existsSync(backgroundFilePath)) {
     fs.unlinkSync(backgroundFilePath);
@@ -885,9 +895,10 @@ async function saveMapBackground(mapId, dataUrl) {
     throw Object.assign(new Error('Imagem muito grande. Limite de 6 MB.'), { statusCode: 400 });
   }
 
-  const fileName = `map-${mapId}.${extension}`;
+  const version = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+  const fileName = `map-${mapId}-${version}.${extension}`;
   fs.writeFileSync(path.join(MAP_BACKGROUND_DIR, fileName), content);
-  return `/assets/maps/backgrounds/${fileName}`;
+  return `/assets/maps/backgrounds/${fileName}?v=${version}`;
 }
 
 async function saveRaceSpritePackage(raceId, dataUrl) {
@@ -1335,7 +1346,10 @@ function isFormUrlEncoded(request) {
 }
 
 function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
   response.end(JSON.stringify(payload));
 }
 
@@ -1383,9 +1397,30 @@ function serveStaticFile(request, response) {
       return;
     }
 
-    response.writeHead(200, { 'Content-Type': getContentType(filePath) });
+    response.writeHead(200, getStaticHeaders(filePath));
     response.end(content);
   });
+}
+
+function getStaticHeaders(filePath) {
+  const relativePath = filePath.slice(CLIENT_DIR.length).replaceAll(path.sep, '/');
+  const headers = { 'Content-Type': getContentType(filePath) };
+
+  if (relativePath.startsWith('/assets/maps/data/')) {
+    headers['Cache-Control'] = 'no-store';
+    return headers;
+  }
+
+  if (relativePath.startsWith('/assets/maps/backgrounds/')) {
+    headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    return headers;
+  }
+
+  if (['.html', '.js'].includes(path.extname(filePath))) {
+    headers['Cache-Control'] = 'no-store';
+  }
+
+  return headers;
 }
 
 function getContentType(filePath) {

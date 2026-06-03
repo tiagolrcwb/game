@@ -47,6 +47,9 @@ const CELL_LEVEL_SCALES = {
   4: 1.1,
   5: 1.2,
 };
+const MIN_CAMERA_ZOOM = 0.8;
+const MAX_CAMERA_ZOOM = 1.2;
+const ZOOM_STEP = 0.2;
 const DEFAULT_WORLD = {
   width: 32000,
   height: 32000,
@@ -102,11 +105,14 @@ const raceSpriteSets = new Map();
 let lastSentDirection = { dx: 0, dy: 0 };
 let world = { ...DEFAULT_WORLD };
 let camera = { x: 0, y: 0 };
+let cameraZoom = 1;
 let clickMoveTarget = null;
 let socket = null;
 let heartbeatId = null;
 let reconnectId = null;
 let reconnectAttempts = 0;
+const activeTouchPointers = new Map();
+let pinchGesture = null;
 
 resizeCanvasToViewport();
 window.addEventListener('resize', resizeCanvasToViewport);
@@ -276,6 +282,16 @@ canvas.addEventListener('pointerdown', (event) => {
   event.preventDefault();
   canvas.setPointerCapture?.(event.pointerId);
 
+  if (event.pointerType === 'touch') {
+    activeTouchPointers.set(event.pointerId, getCanvasPoint(event));
+
+    if (activeTouchPointers.size >= 2) {
+      startPinchGesture();
+      clickMoveTarget = null;
+      return;
+    }
+  }
+
   const cell = getClickedCell(event);
 
   if (!cell || isBlockedClickTarget(cell)) {
@@ -290,6 +306,30 @@ canvas.addEventListener('pointerdown', (event) => {
     row: cell.row,
   };
 });
+
+canvas.addEventListener('pointermove', (event) => {
+  if (event.pointerType !== 'touch' || !activeTouchPointers.has(event.pointerId)) {
+    return;
+  }
+
+  activeTouchPointers.set(event.pointerId, getCanvasPoint(event));
+
+  if (activeTouchPointers.size < 2) {
+    return;
+  }
+
+  event.preventDefault();
+  updatePinchZoom();
+});
+
+canvas.addEventListener('pointerup', endTouchPointer);
+canvas.addEventListener('pointercancel', endTouchPointer);
+
+canvas.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  zoomAtCanvasPoint(getCanvasPoint(event), cameraZoom + direction * ZOOM_STEP);
+}, { passive: false });
 
 function getMovementDirection() {
   let dx = 0;
@@ -350,26 +390,28 @@ function updateCamera() {
 
   const marginX = canvas.width * 0.34;
   const marginY = canvas.height * 0.32;
+  const viewportWidth = getViewportWidth();
+  const viewportHeight = getViewportHeight();
   const targetScreenX = target.x + PLAYER_SIZE / 2 - camera.x;
   const targetScreenY = target.y + PLAYER_SIZE / 2 - camera.y;
   let nextCameraX = camera.x;
   let nextCameraY = camera.y;
 
-  if (targetScreenX > canvas.width - marginX) {
-    nextCameraX = target.x + PLAYER_SIZE / 2 - (canvas.width - marginX);
-  } else if (targetScreenX < marginX) {
-    nextCameraX = target.x + PLAYER_SIZE / 2 - marginX;
+  if (targetScreenX > viewportWidth - marginX / cameraZoom) {
+    nextCameraX = target.x + PLAYER_SIZE / 2 - (viewportWidth - marginX / cameraZoom);
+  } else if (targetScreenX < marginX / cameraZoom) {
+    nextCameraX = target.x + PLAYER_SIZE / 2 - marginX / cameraZoom;
   }
 
-  if (targetScreenY > canvas.height - marginY) {
-    nextCameraY = target.y + PLAYER_SIZE / 2 - (canvas.height - marginY);
-  } else if (targetScreenY < marginY) {
-    nextCameraY = target.y + PLAYER_SIZE / 2 - marginY;
+  if (targetScreenY > viewportHeight - marginY / cameraZoom) {
+    nextCameraY = target.y + PLAYER_SIZE / 2 - (viewportHeight - marginY / cameraZoom);
+  } else if (targetScreenY < marginY / cameraZoom) {
+    nextCameraY = target.y + PLAYER_SIZE / 2 - marginY / cameraZoom;
   }
 
   camera = {
-    x: clamp(nextCameraX, 0, Math.max(0, world.width - canvas.width)),
-    y: clamp(nextCameraY, 0, Math.max(0, world.height - canvas.height)),
+    x: clamp(nextCameraX, 0, Math.max(0, world.width - viewportWidth)),
+    y: clamp(nextCameraY, 0, Math.max(0, world.height - viewportHeight)),
   };
 }
 
@@ -385,6 +427,29 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function appendAssetVersion(source, version) {
+  if (!source || !version) {
+    return source;
+  }
+
+  return `${source}${source.includes('?') ? '&' : '?'}v=${encodeURIComponent(version)}`;
+}
+
+function getViewportWidth() {
+  return canvas.width / cameraZoom;
+}
+
+function getViewportHeight() {
+  return canvas.height / cameraZoom;
+}
+
+function clampCameraToWorld() {
+  camera = {
+    x: clamp(camera.x, 0, Math.max(0, world.width - getViewportWidth())),
+    y: clamp(camera.y, 0, Math.max(0, world.height - getViewportHeight())),
+  };
+}
+
 function resizeCanvasToViewport() {
   const rect = canvas.getBoundingClientRect();
   const nextWidth = Math.max(320, Math.round(rect.width || window.innerWidth || canvas.width));
@@ -397,10 +462,83 @@ function resizeCanvasToViewport() {
   canvas.width = nextWidth;
   canvas.height = nextHeight;
   context.imageSmoothingEnabled = false;
-  camera = {
-    x: clamp(camera.x, 0, Math.max(0, world.width - canvas.width)),
-    y: clamp(camera.y, 0, Math.max(0, world.height - canvas.height)),
+  clampCameraToWorld();
+}
+
+function getCanvasPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+  const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
   };
+}
+
+function zoomAtCanvasPoint(point, nextZoom) {
+  const clampedZoom = clamp(Math.round(nextZoom * 100) / 100, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
+
+  if (clampedZoom === cameraZoom) {
+    return;
+  }
+
+  const worldPoint = {
+    x: camera.x + point.x / cameraZoom,
+    y: camera.y + point.y / cameraZoom,
+  };
+
+  cameraZoom = clampedZoom;
+  camera = {
+    x: worldPoint.x - point.x / cameraZoom,
+    y: worldPoint.y - point.y / cameraZoom,
+  };
+  clampCameraToWorld();
+}
+
+function startPinchGesture() {
+  const points = [...activeTouchPointers.values()].slice(0, 2);
+  pinchGesture = {
+    distance: getPointDistance(points[0], points[1]),
+    zoom: cameraZoom,
+  };
+}
+
+function updatePinchZoom() {
+  const points = [...activeTouchPointers.values()].slice(0, 2);
+
+  if (!pinchGesture || points.length < 2) {
+    startPinchGesture();
+    return;
+  }
+
+  const distance = getPointDistance(points[0], points[1]);
+  const midpoint = {
+    x: (points[0].x + points[1].x) / 2,
+    y: (points[0].y + points[1].y) / 2,
+  };
+
+  if (pinchGesture.distance > 0) {
+    zoomAtCanvasPoint(midpoint, pinchGesture.zoom * (distance / pinchGesture.distance));
+  }
+}
+
+function endTouchPointer(event) {
+  if (event.pointerType !== 'touch') {
+    return;
+  }
+
+  activeTouchPointers.delete(event.pointerId);
+
+  if (activeTouchPointers.size < 2) {
+    pinchGesture = null;
+  } else {
+    startPinchGesture();
+  }
+}
+
+function getPointDistance(first, second) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
 }
 
 function renderBackground() {
@@ -408,16 +546,19 @@ function renderBackground() {
   context.fillRect(0, 0, canvas.width, canvas.height);
 
   context.save();
+  context.scale(cameraZoom, cameraZoom);
   context.translate(-camera.x, -camera.y);
 
   context.fillStyle = world.backgroundColor;
   context.fillRect(0, 0, world.width, world.height);
   renderWorldBackgroundImage();
 
+  const viewportWidth = getViewportWidth();
+  const viewportHeight = getViewportHeight();
   const firstGridX = Math.floor(camera.x / world.cellSize) * world.cellSize;
-  const lastGridX = Math.min(world.width, camera.x + canvas.width + world.cellSize);
+  const lastGridX = Math.min(world.width, camera.x + viewportWidth + world.cellSize);
   const firstGridY = Math.floor(camera.y / world.cellSize) * world.cellSize;
-  const lastGridY = Math.min(world.height, camera.y + canvas.height + world.cellSize);
+  const lastGridY = Math.min(world.height, camera.y + viewportHeight + world.cellSize);
 
   if (world.showGrid) {
     context.strokeStyle = world.gridColor;
@@ -443,10 +584,16 @@ function renderBackground() {
   context.restore();
 
   if (world.showCoordinates) {
+    context.save();
+    context.scale(cameraZoom, cameraZoom);
     renderGridLabels(firstGridX, lastGridX, firstGridY, lastGridY);
     renderActiveCellLabel();
+    context.restore();
   }
+  context.save();
+  context.scale(cameraZoom, cameraZoom);
   renderClickMoveTarget();
+  context.restore();
 }
 
 function preloadBackgroundImage(source) {
@@ -455,7 +602,7 @@ function preloadBackgroundImage(source) {
   }
 
   const image = new Image();
-  image.src = `${source}?v=${encodeURIComponent(world.mapId || '')}`;
+  image.src = appendAssetVersion(source, world.mapId || '');
   backgroundImages.set(source, image);
 }
 
@@ -505,7 +652,7 @@ function renderActiveCellLabel() {
   context.font = '13px Arial';
   context.textAlign = 'left';
   context.textBaseline = 'top';
-  const labelWidth = Math.min(canvas.width - 24, Math.max(172, context.measureText(label).width + 20));
+  const labelWidth = Math.min(getViewportWidth() - 24, Math.max(172, context.measureText(label).width + 20));
   context.fillStyle = 'rgba(8, 9, 13, 0.78)';
   context.fillRect(12, 12, labelWidth, 26);
   context.strokeStyle = 'rgba(185, 139, 87, 0.42)';
@@ -523,11 +670,9 @@ function getPlayerCell(player) {
 }
 
 function getClickedCell(event) {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
-  const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
-  const worldX = (event.clientX - rect.left) * scaleX + camera.x;
-  const worldY = (event.clientY - rect.top) * scaleY + camera.y;
+  const point = getCanvasPoint(event);
+  const worldX = point.x / cameraZoom + camera.x;
+  const worldY = point.y / cameraZoom + camera.y;
   const column = Math.floor(worldX / world.cellSize);
   const row = Math.floor(worldY / world.cellSize);
 
@@ -551,7 +696,7 @@ function renderClickMoveTarget() {
   const y = clickMoveTarget.row * world.cellSize - camera.y;
   const size = world.cellSize;
 
-  if (x + size < 0 || y + size < 0 || x > canvas.width || y > canvas.height) {
+  if (x + size < 0 || y + size < 0 || x > getViewportWidth() || y > getViewportHeight()) {
     return;
   }
 
@@ -596,9 +741,9 @@ function isPlayerVisible(player) {
 
   return (
     player.x > -characterSize &&
-    player.x < canvas.width + characterSize &&
+    player.x < getViewportWidth() + characterSize &&
     player.y > -characterSize &&
-    player.y < canvas.height + characterSize
+    player.y < getViewportHeight() + characterSize
   );
 }
 
@@ -807,7 +952,10 @@ function gameLoop() {
   sendMovementIntent();
   updateCamera();
   renderBackground();
+  context.save();
+  context.scale(cameraZoom, cameraZoom);
   renderPlayers();
+  context.restore();
   requestAnimationFrame(gameLoop);
 }
 

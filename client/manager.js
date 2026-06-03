@@ -583,7 +583,7 @@ function renderBackgroundPreview() {
   backgroundPreview.innerHTML = '';
   const image = document.createElement('img');
   image.alt = `Background de ${map.name}`;
-  image.src = `${map.backgroundImagePath}?v=${Date.now()}`;
+  image.src = appendAssetVersion(map.backgroundImagePath, Date.now());
   backgroundPreview.append(image);
 }
 
@@ -1338,8 +1338,16 @@ function preloadEditorBackground(force = false) {
 
   const image = new Image();
   image.onload = renderEditor;
-  image.src = `${editor.map.backgroundImagePath}?v=${Date.now()}`;
+  image.src = appendAssetVersion(editor.map.backgroundImagePath, Date.now());
   editor.backgroundImage = image;
+}
+
+function appendAssetVersion(source, version) {
+  if (!source || !version) {
+    return source;
+  }
+
+  return `${source}${source.includes('?') ? '&' : '?'}v=${encodeURIComponent(version)}`;
 }
 
 function resizeEditorCanvas() {

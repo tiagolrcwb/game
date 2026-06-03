@@ -43,15 +43,15 @@
         position: absolute;
         top: calc(env(safe-area-inset-top) + 12px);
         left: calc(env(safe-area-inset-left) + 12px);
-        right: calc(env(safe-area-inset-right) + 12px);
         z-index: 2;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 16px;
+        gap: 10px;
+        max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px);
         min-height: 42px;
         padding: 8px 10px;
         border: 1px solid rgba(185, 139, 87, 0.34);
+        border-radius: 6px;
         background: rgba(8, 9, 13, 0.76);
         backdrop-filter: blur(10px);
         box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
@@ -72,7 +72,7 @@
       .user-area {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         color: #b9ad9a;
         font-size: 14px;
         min-width: 0;
@@ -111,29 +111,50 @@
 
       @media (max-width: 720px) {
         .game-header {
-          top: calc(env(safe-area-inset-top) + 8px);
-          left: calc(env(safe-area-inset-left) + 8px);
-          right: calc(env(safe-area-inset-right) + 8px);
-          gap: 8px;
-          min-height: 38px;
-          padding: 6px 8px;
+          top: calc(env(safe-area-inset-top) + 6px);
+          left: calc(env(safe-area-inset-left) + 6px);
+          gap: 6px;
+          max-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 12px);
+          min-height: 0;
+          padding: 4px 5px;
+          border-radius: 4px;
+          background: rgba(8, 9, 13, 0.58);
+          box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
         }
 
         h1 {
-          font-size: 13px;
+          max-width: 34vw;
+          font-size: 10px;
         }
 
         .user-area {
-          gap: 8px;
-          font-size: 12px;
+          gap: 5px;
+          font-size: 10px;
         }
 
         [data-username] {
           display: none;
         }
 
+        .connection-status {
+          width: 7px;
+          height: 7px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: #8fbf91;
+          color: transparent;
+        }
+
+        .connection-status.offline {
+          background: #d77272;
+          color: transparent;
+        }
+
         button {
-          padding: 7px 9px;
+          min-width: 28px;
+          min-height: 24px;
+          padding: 3px 6px;
+          font-size: 10px;
         }
       }
     </style>
@@ -152,6 +173,6 @@
       <canvas id="gameCanvas" width="1140" height="600"></canvas>
     </main>
 
-    <script src="game.js?v=2026-06-03-fullscreen-1"></script>
+    <script src="game.js?v=2026-06-03-mobile-zoom-bg-1"></script>
   </body>
 </html>
