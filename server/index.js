@@ -80,6 +80,7 @@ const wss = new WebSocketServer({ server });
 const players = new Map();
 const playersByUserId = new Map();
 let gameConfig = DEFAULT_GAME_CONFIG;
+const mapsById = new Map([[DEFAULT_GAME_CONFIG.map.id, DEFAULT_GAME_CONFIG.map]]);
 const heartbeatInterval = setInterval(() => {
   for (const socket of wss.clients) {
     if (!socket.isAlive) {
@@ -148,6 +149,7 @@ async function handleManagerRequest(request, response) {
     const body = await readRequestBody(request);
     await applyMigration(String(body.filename || ''));
     await reloadGameConfig();
+    broadcastGameState();
     sendJson(response, 200, { migrations: await getMigrations() });
     return;
   }
@@ -156,6 +158,7 @@ async function handleManagerRequest(request, response) {
     const body = await readRequestBody(request);
     await saveGameSettings(body);
     await reloadGameConfig();
+    broadcastGameState();
     sendJson(response, 200, await getManagerState());
     return;
   }
@@ -164,6 +167,7 @@ async function handleManagerRequest(request, response) {
     const body = await readRequestBody(request);
     await saveMap(body);
     await reloadGameConfig();
+    broadcastGameState();
     sendJson(response, 200, await getManagerState());
     return;
   }
@@ -342,7 +346,7 @@ async function saveMap(body) {
     name: normalizeText(body.name, 3, 80),
     widthCells,
     heightCells,
-    cellSize: toBoundedInt(body.cellSize, 8, 128, 'Tamanho da celula invalido.'),
+    cellSize: toBoundedInt(body.cellSize, 16, 128, 'Tamanho da celula invalido.'),
     characterSize: toBoundedInt(body.characterSize, 16, 256, 'Tamanho do personagem invalido.'),
     entryColumn: toBoundedInt(body.entryColumn, 1, widthCells, 'Coluna de entrada invalida.'),
     entryRow: toBoundedInt(body.entryRow, 1, heightCells, 'Linha de entrada invalida.'),
@@ -478,6 +482,19 @@ function mapTaxonomyRow(row) {
 
 async function reloadGameConfig() {
   try {
+    const [mapRows] = await db.execute(
+      `SELECT id, name, width_cells, height_cells, cell_size, character_size,
+        entry_column, entry_row, background_color, grid_color,
+        north_map_id, east_map_id, south_map_id, west_map_id
+        FROM maps ORDER BY id`,
+    );
+    mapsById.clear();
+
+    for (const row of mapRows) {
+      const map = mapMapRow(row);
+      mapsById.set(map.id, map);
+    }
+
     const [rows] = await db.execute(
       `SELECT gs.game_name, m.id, m.name, m.width_cells, m.height_cells, m.cell_size,
         m.character_size, m.entry_column, m.entry_row, m.background_color, m.grid_color, m.north_map_id,
@@ -490,6 +507,7 @@ async function reloadGameConfig() {
 
     if (!rows[0]) {
       gameConfig = DEFAULT_GAME_CONFIG;
+      mapsById.set(DEFAULT_GAME_CONFIG.map.id, DEFAULT_GAME_CONFIG.map);
       return;
     }
 
@@ -500,15 +518,21 @@ async function reloadGameConfig() {
   } catch (error) {
     console.warn('Using fallback game config:', error.code || error.message);
     gameConfig = DEFAULT_GAME_CONFIG;
+    mapsById.clear();
+    mapsById.set(DEFAULT_GAME_CONFIG.map.id, DEFAULT_GAME_CONFIG.map);
   }
 }
 
-function getWorldWidth() {
-  return gameConfig.map.widthCells * gameConfig.map.cellSize;
+function getMapForPlayer(player) {
+  return mapsById.get(player?.mapId) || gameConfig.map;
 }
 
-function getWorldHeight() {
-  return gameConfig.map.heightCells * gameConfig.map.cellSize;
+function getWorldWidth(map = gameConfig.map) {
+  return map.widthCells * map.cellSize;
+}
+
+function getWorldHeight(map = gameConfig.map) {
+  return map.heightCells * map.cellSize;
 }
 
 function normalizeText(value, minLength, maxLength) {
@@ -736,13 +760,14 @@ function getContentType(filePath) {
 }
 
 function createPlayer(id, user) {
-  const spawn = getMapEntryPosition();
+  const map = gameConfig.map;
+  const spawn = getMapEntryPosition(map);
 
   return {
     id,
     userId: user.id,
     username: user.username,
-    mapId: gameConfig.map.id,
+    mapId: map.id,
     x: spawn.x,
     y: spawn.y,
     direction: 'south',
@@ -784,14 +809,14 @@ function schedulePlayerRemoval(player, socketId) {
   }, PLAYER_DISCONNECT_GRACE_MS);
 }
 
-function getMapEntryPosition() {
-  const cellSize = gameConfig.map.cellSize;
-  const column = clamp(gameConfig.map.entryColumn || 1, 1, gameConfig.map.widthCells);
-  const row = clamp(gameConfig.map.entryRow || 1, 1, gameConfig.map.heightCells);
+function getMapEntryPosition(map) {
+  const cellSize = map.cellSize;
+  const column = clamp(map.entryColumn || 1, 1, map.widthCells);
+  const row = clamp(map.entryRow || 1, 1, map.heightCells);
 
   return {
-    x: clamp((column - 0.5) * cellSize - PLAYER_SIZE / 2, 0, getWorldWidth() - PLAYER_SIZE),
-    y: clamp((row - 0.5) * cellSize - PLAYER_SIZE / 2, 0, getWorldHeight() - PLAYER_SIZE),
+    x: clamp((column - 0.5) * cellSize - PLAYER_SIZE / 2, 0, getWorldWidth(map) - PLAYER_SIZE),
+    y: clamp((row - 0.5) * cellSize - PLAYER_SIZE / 2, 0, getWorldHeight(map) - PLAYER_SIZE),
   };
 }
 
@@ -800,37 +825,45 @@ function clamp(value, min, max) {
 }
 
 function broadcastGameState() {
-  const message = JSON.stringify({
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+
+    client.send(JSON.stringify(createGameStateMessage(client.player)));
+  }
+}
+
+function createGameStateMessage(viewer) {
+  const map = getMapForPlayer(viewer);
+  const visiblePlayers = Array.from(players.values()).filter((player) => player.mapId === map.id);
+
+  return {
     type: 'state',
     game: {
       name: gameConfig.gameName,
     },
     world: {
-      width: getWorldWidth(),
-      height: getWorldHeight(),
-      widthCells: gameConfig.map.widthCells,
-      heightCells: gameConfig.map.heightCells,
-      cellSize: gameConfig.map.cellSize,
-      characterSize: gameConfig.map.characterSize,
-      entryColumn: gameConfig.map.entryColumn,
-      entryRow: gameConfig.map.entryRow,
-      backgroundColor: gameConfig.map.backgroundColor,
-      gridColor: gameConfig.map.gridColor,
-      mapId: gameConfig.map.id,
-      mapName: gameConfig.map.name,
-      exits: gameConfig.map.exits,
+      width: getWorldWidth(map),
+      height: getWorldHeight(map),
+      widthCells: map.widthCells,
+      heightCells: map.heightCells,
+      cellSize: map.cellSize,
+      characterSize: map.characterSize,
+      entryColumn: map.entryColumn,
+      entryRow: map.entryRow,
+      backgroundColor: map.backgroundColor,
+      gridColor: map.gridColor,
+      mapId: map.id,
+      mapName: map.name,
+      exits: map.exits,
     },
-    players: Array.from(players.values()),
-  });
-
-  for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
-  }
+    players: visiblePlayers,
+  };
 }
 
 function handleMove(player, dx, dy) {
+  const map = getMapForPlayer(player);
   const normalizedDx = Math.sign(Number(dx) || 0);
   const normalizedDy = Math.sign(Number(dy) || 0);
 
@@ -840,8 +873,75 @@ function handleMove(player, dx, dy) {
     player.direction = getPlayerDirection(normalizedDx, normalizedDy);
   }
 
-  player.x = clamp(player.x + normalizedDx * PLAYER_SPEED, 0, getWorldWidth() - PLAYER_SIZE);
-  player.y = clamp(player.y + normalizedDy * PLAYER_SPEED, 0, getWorldHeight() - PLAYER_SIZE);
+  player.x += normalizedDx * PLAYER_SPEED;
+  player.y += normalizedDy * PLAYER_SPEED;
+
+  if (tryTeleportAtMapEdge(player, map)) {
+    return;
+  }
+
+  player.x = clamp(player.x, 0, getWorldWidth(map) - PLAYER_SIZE);
+  player.y = clamp(player.y, 0, getWorldHeight(map) - PLAYER_SIZE);
+}
+
+function tryTeleportAtMapEdge(player, map) {
+  const worldWidth = getWorldWidth(map);
+  const worldHeight = getWorldHeight(map);
+
+  if (player.x < 0 && map.exits.west) {
+    teleportPlayer(player, map.exits.west, 'west');
+    return true;
+  }
+
+  if (player.x > worldWidth - PLAYER_SIZE && map.exits.east) {
+    teleportPlayer(player, map.exits.east, 'east');
+    return true;
+  }
+
+  if (player.y < 0 && map.exits.north) {
+    teleportPlayer(player, map.exits.north, 'north');
+    return true;
+  }
+
+  if (player.y > worldHeight - PLAYER_SIZE && map.exits.south) {
+    teleportPlayer(player, map.exits.south, 'south');
+    return true;
+  }
+
+  return false;
+}
+
+function teleportPlayer(player, targetMapId, fromDirection) {
+  const targetMap = mapsById.get(targetMapId);
+
+  if (!targetMap) {
+    return;
+  }
+
+  player.mapId = targetMap.id;
+
+  if (fromDirection === 'west') {
+    player.x = getWorldWidth(targetMap) - PLAYER_SIZE - targetMap.cellSize;
+    player.y = clamp(player.y, 0, getWorldHeight(targetMap) - PLAYER_SIZE);
+    return;
+  }
+
+  if (fromDirection === 'east') {
+    player.x = targetMap.cellSize;
+    player.y = clamp(player.y, 0, getWorldHeight(targetMap) - PLAYER_SIZE);
+    return;
+  }
+
+  if (fromDirection === 'north') {
+    player.x = clamp(player.x, 0, getWorldWidth(targetMap) - PLAYER_SIZE);
+    player.y = getWorldHeight(targetMap) - PLAYER_SIZE - targetMap.cellSize;
+    return;
+  }
+
+  if (fromDirection === 'south') {
+    player.x = clamp(player.x, 0, getWorldWidth(targetMap) - PLAYER_SIZE);
+    player.y = targetMap.cellSize;
+  }
 }
 
 function getPlayerDirection(dx, dy) {
@@ -869,6 +969,7 @@ wss.on('connection', (socket, request) => {
   const playerId = crypto.randomUUID();
   const player = getOrCreatePlayer(playerId, user);
   socket.isAlive = true;
+  socket.player = player;
 
   console.log(`Player connected: ${user.username} (${playerId})`);
   broadcastGameState();

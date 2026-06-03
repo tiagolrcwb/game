@@ -135,6 +135,7 @@ function applyStateMessage(message) {
   }
 
   if (message.world) {
+    const previousMapId = world.mapId;
     world = {
       ...DEFAULT_WORLD,
       ...message.world,
@@ -145,6 +146,10 @@ function applyStateMessage(message) {
       cellSize: Number(message.world.cellSize) || DEFAULT_WORLD.cellSize,
       characterSize: Number(message.world.characterSize) || DEFAULT_WORLD.characterSize,
     };
+
+    if (world.mapId !== previousMapId) {
+      camera = { x: 0, y: 0 };
+    }
   }
 
   players.clear();
