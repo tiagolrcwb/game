@@ -1,6 +1,9 @@
 const tokenForm = document.querySelector('[data-token-form]');
 const loginStatus = document.querySelector('[data-login-status]');
 const statusElement = document.querySelector('[data-status]');
+const sectionTitle = document.querySelector('[data-section-title]');
+const managerSectionButtons = document.querySelectorAll('[data-manager-section]');
+const managerSections = document.querySelectorAll('[data-section]');
 const settingsForm = document.querySelector('[data-settings-form]');
 const mapForm = document.querySelector('[data-map-form]');
 const mapList = document.querySelector('[data-map-list]');
@@ -19,9 +22,13 @@ const editorSaveButton = document.querySelector('[data-editor-save]');
 const editorZoomInButton = document.querySelector('[data-editor-zoom-in]');
 const editorZoomOutButton = document.querySelector('[data-editor-zoom-out]');
 const editorBackgroundInput = document.querySelector('[data-editor-background]');
+const backgroundPreview = document.querySelector('[data-background-preview]');
 const teleportForm = document.querySelector('[data-teleport-form]');
 const teleportTargetSelect = document.querySelector('[data-teleport-target]');
 const teleportList = document.querySelector('[data-teleport-list]');
+const newMapButton = document.querySelector('[data-new-map]');
+const mapTabButtons = document.querySelectorAll('[data-map-tab]');
+const mapTabPanels = document.querySelectorAll('[data-map-tab-panel]');
 
 let managerToken = localStorage.getItem('managerToken') || '';
 let state = {
@@ -31,6 +38,8 @@ let state = {
   classes: [],
 };
 let migrations = [];
+let selectedSection = 'maps';
+let selectedMapId = null;
 let editor = {
   map: null,
   data: createEmptyMapData(),
@@ -83,6 +92,23 @@ logoutButton.addEventListener('click', () => {
   document.body.classList.add('locked');
 });
 
+for (const button of managerSectionButtons) {
+  button.addEventListener('click', () => setManagerSection(button.dataset.managerSection));
+}
+
+for (const button of mapTabButtons) {
+  button.addEventListener('click', () => setMapTab(button.dataset.mapTab));
+}
+
+newMapButton.addEventListener('click', () => {
+  selectedMapId = null;
+  mapForm.reset();
+  mapForm.elements.id.value = '';
+  setDefaultMapFormValues();
+  renderMaps();
+  setMapTab('settings');
+});
+
 settingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await save('/api/manager/settings', 'PUT', formToObject(settingsForm));
@@ -90,10 +116,14 @@ settingsForm.addEventListener('submit', async (event) => {
 
 mapForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  const existingId = Number(mapForm.elements.id.value || 0);
   await save('/api/manager/maps', 'POST', formToObject(mapForm));
-  mapForm.reset();
-  mapForm.elements.id.value = '';
-  setDefaultMapFormValues();
+  selectedMapId = existingId || state.maps.at(-1)?.id || selectedMapId;
+  const selectedMap = getSelectedMap();
+  if (selectedMap) {
+    fillMapForm(selectedMap);
+    await selectMap(selectedMap.id);
+  }
 });
 
 for (const form of taxonomyForms) {
@@ -107,7 +137,7 @@ for (const form of taxonomyForms) {
 
 refreshMigrationsButton.addEventListener('click', loadMigrations);
 applyPendingButton.addEventListener('click', applyPendingMigrations);
-editorMapSelect.addEventListener('change', () => loadMapEditor(Number(editorMapSelect.value)));
+editorMapSelect.addEventListener('change', () => selectMap(Number(editorMapSelect.value)));
 editorSaveButton.addEventListener('click', saveMapEditor);
 editorZoomInButton.addEventListener('click', () => setEditorZoom(editor.zoom * 1.25));
 editorZoomOutButton.addEventListener('click', () => setEditorZoom(editor.zoom / 1.25));
@@ -225,22 +255,82 @@ async function save(url, method, payload) {
   setStatus('Salvo.');
 }
 
+function setManagerSection(section) {
+  selectedSection = section;
+
+  for (const button of managerSectionButtons) {
+    button.classList.toggle('active', button.dataset.managerSection === section);
+  }
+
+  for (const panel of managerSections) {
+    panel.classList.toggle('active', panel.dataset.section === section);
+  }
+
+  const activeButton = [...managerSectionButtons].find((button) => button.dataset.managerSection === section);
+  sectionTitle.textContent = activeButton?.textContent || 'Gerente';
+
+  if (section === 'maps') {
+    renderEditor();
+  }
+}
+
+function setMapTab(tab) {
+  for (const button of mapTabButtons) {
+    button.classList.toggle('active', button.dataset.mapTab === tab);
+  }
+
+  for (const panel of mapTabPanels) {
+    panel.classList.toggle('active', panel.dataset.mapTabPanel === tab);
+  }
+
+  if (tab === 'editor') {
+    renderEditor();
+  }
+}
+
+async function selectMap(mapId) {
+  const map = state.maps.find((item) => item.id === Number(mapId));
+
+  if (!map) {
+    return;
+  }
+
+  selectedMapId = map.id;
+  fillMapForm(map);
+  editorMapSelect.value = map.id;
+  renderMaps();
+  renderBackgroundPreview();
+  await loadMapEditor(map.id);
+}
+
+function getSelectedMap() {
+  return state.maps.find((map) => map.id === Number(selectedMapId)) || null;
+}
+
 function renderState() {
-  const currentEditorMapId = editor.map?.id;
+  if (!selectedMapId && state.maps.length > 0) {
+    selectedMapId = state.settings.defaultMapId || state.maps[0].id;
+  }
 
   settingsForm.elements.gameName.value = state.settings.gameName || '';
   renderMapOptions(mapSelect, false);
   renderMapOptions(editorMapSelect, false);
   renderMapOptions(teleportTargetSelect, false);
   mapSelect.value = state.settings.defaultMapId || '';
-  editorMapSelect.value = currentEditorMapId || state.settings.defaultMapId || state.maps[0]?.id || '';
+  editorMapSelect.value = selectedMapId || state.settings.defaultMapId || state.maps[0]?.id || '';
   renderMapOptionsForExits();
-  setDefaultMapFormValues();
+  const selectedMap = getSelectedMap();
+  if (selectedMap) {
+    fillMapForm(selectedMap);
+  } else {
+    setDefaultMapFormValues();
+  }
   renderMaps();
+  renderBackgroundPreview();
   renderTaxonomy('races');
   renderTaxonomy('classes');
 
-  if (state.maps.length > 0 && !editor.map) {
+  if (state.maps.length > 0 && (!editor.map || editor.map.id !== Number(editorMapSelect.value))) {
     loadMapEditor(Number(editorMapSelect.value));
   }
 }
@@ -295,9 +385,14 @@ function renderMapOptionsForExits() {
 function renderMaps() {
   mapList.innerHTML = '';
 
+  if (state.maps.length === 0) {
+    mapList.innerHTML = '<p class="status">Nenhum mapa cadastrado.</p>';
+    return;
+  }
+
   for (const map of state.maps) {
     const item = document.createElement('button');
-    item.className = 'item';
+    item.className = `item${map.id === selectedMapId ? ' active' : ''}`;
     item.type = 'button';
     item.innerHTML = `
       <strong>${escapeHtml(map.name)}</strong>
@@ -305,11 +400,7 @@ function renderMaps() {
       <small>Entrada: Col ${map.entryColumn} / Lin ${map.entryRow}</small>
       <small>Saidas: N ${map.exits.north || '-'} | L ${map.exits.east || '-'} | S ${map.exits.south || '-'} | O ${map.exits.west || '-'}</small>
     `;
-    item.addEventListener('click', () => {
-      fillMapForm(map);
-      editorMapSelect.value = map.id;
-      loadMapEditor(map.id);
-    });
+    item.addEventListener('click', () => selectMap(map.id));
     mapList.append(item);
   }
 }
@@ -352,6 +443,25 @@ function fillMapForm(map) {
   mapForm.elements.eastMapId.value = map.exits.east || '';
   mapForm.elements.southMapId.value = map.exits.south || '';
   mapForm.elements.westMapId.value = map.exits.west || '';
+}
+
+function renderBackgroundPreview() {
+  const map = getSelectedMap();
+
+  if (!backgroundPreview) {
+    return;
+  }
+
+  if (!map?.backgroundImagePath) {
+    backgroundPreview.textContent = 'Nenhuma imagem vinculada.';
+    return;
+  }
+
+  backgroundPreview.innerHTML = '';
+  const image = document.createElement('img');
+  image.alt = `Background de ${map.name}`;
+  image.src = `${map.backgroundImagePath}?v=${Date.now()}`;
+  backgroundPreview.append(image);
 }
 
 function setDefaultMapFormValues() {
@@ -440,6 +550,11 @@ async function uploadMapBackground() {
     return;
   }
 
+  if (file.size > 6 * 1024 * 1024) {
+    setStatus('Imagem muito grande. Limite de 6 MB.');
+    return;
+  }
+
   setStatus('Enviando imagem...');
   const dataUrl = await fileToDataUrl(file);
   const response = await fetch('/api/manager/map-background', {
@@ -461,10 +576,13 @@ async function uploadMapBackground() {
   }
 
   state = data;
+  selectedMapId = editor.map.id;
   const updatedMap = state.maps.find((map) => map.id === editor.map.id);
   editor.map = updatedMap || editor.map;
   preloadEditorBackground(true);
+  editorBackgroundInput.value = '';
   renderState();
+  renderBackgroundPreview();
   setStatus('Imagem enviada.');
 }
 

@@ -12,6 +12,7 @@ const PLAYER_SIZE = 24;
 const PLAYER_SPEED = 5;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
+const MAX_REQUEST_BODY_SIZE = 12 * 1024 * 1024;
 const APP_VERSION = '2026-06-03-map-runtime-4';
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
@@ -883,7 +884,7 @@ function readRequestBody(request) {
     request.on('data', (chunk) => {
       rawBody += chunk;
 
-      if (rawBody.length > 8 * 1024 * 1024) {
+      if (rawBody.length > MAX_REQUEST_BODY_SIZE) {
         request.destroy();
       }
     });

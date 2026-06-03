@@ -5,6 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Gerente - Vigilia dos Portoes</title>
     <style>
+      :root {
+        color-scheme: dark;
+        --background: #09090b;
+        --foreground: #f4f4f5;
+        --muted: #a1a1aa;
+        --muted-foreground: #71717a;
+        --card: #0f0f12;
+        --card-strong: #141418;
+        --border: #27272a;
+        --input: #18181b;
+        --primary: #fafafa;
+        --primary-foreground: #09090b;
+        --accent: #1f2937;
+        --ring: #e4e4e7;
+        --danger: #ef4444;
+        --success: #22c55e;
+        --info: #38bdf8;
+        --radius: 8px;
+      }
+
       * {
         box-sizing: border-box;
       }
@@ -12,9 +32,9 @@
       body {
         margin: 0;
         min-height: 100vh;
-        background: #0d0f14;
-        color: #e3dac8;
-        font-family: Arial, Helvetica, sans-serif;
+        background: var(--background);
+        color: var(--foreground);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
       body.locked .manager-app {
@@ -32,56 +52,84 @@
         font: inherit;
       }
 
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
       button {
-        border: 1px solid #3b332b;
-        background: #171820;
-        color: #e3dac8;
-        padding: 10px 12px;
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--card);
+        color: var(--foreground);
+        padding: 8px 12px;
         cursor: pointer;
+        transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+      }
+
+      button:hover:not(:disabled) {
+        background: var(--accent);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
       }
 
       button.primary {
-        border-color: #b98b57;
-        background: #b98b57;
-        color: #120e0a;
-        font-weight: 700;
+        border-color: var(--primary);
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-weight: 650;
       }
 
       input,
       textarea,
       select {
         width: 100%;
-        border: 1px solid #302c27;
-        background: #11131a;
-        color: #f0e6d4;
-        padding: 10px 11px;
+        min-height: 38px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--input);
+        color: var(--foreground);
+        padding: 8px 10px;
         outline: none;
       }
 
+      input[type="color"] {
+        padding: 4px;
+      }
+
       textarea {
-        min-height: 86px;
+        min-height: 94px;
         resize: vertical;
       }
 
       input:focus,
       textarea:focus,
-      select:focus {
-        border-color: #b98b57;
-        box-shadow: 0 0 0 3px rgba(185, 139, 87, 0.14);
+      select:focus,
+      button:focus-visible {
+        border-color: var(--ring);
+        box-shadow: 0 0 0 3px rgba(228, 228, 231, 0.14);
       }
 
       label {
         display: grid;
         gap: 7px;
-        color: #bfb3a1;
+        color: var(--muted);
         font-size: 13px;
+        line-height: 1.35;
       }
 
       .login-panel {
         width: min(420px, calc(100vw - 32px));
         margin: 12vh auto 0;
-        border: 1px solid #302c27;
-        background: #11131a;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--card);
         padding: 28px;
       }
 
@@ -96,45 +144,138 @@
         min-height: 100vh;
       }
 
+      .app-shell {
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        border-right: 1px solid var(--border);
+        background: #0c0c0f;
+        padding: 18px 14px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 18px;
+      }
+
+      .brand {
+        display: grid;
+        gap: 4px;
+        padding: 0 8px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .brand h1 {
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .brand span {
+        color: var(--muted-foreground);
+        font-size: 12px;
+      }
+
+      .side-nav {
+        display: grid;
+        align-content: start;
+        gap: 4px;
+      }
+
+      .nav-button {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 10px;
+        border-color: transparent;
+        background: transparent;
+        color: var(--muted);
+        text-align: left;
+      }
+
+      .nav-button.active {
+        border-color: var(--border);
+        background: var(--card-strong);
+        color: var(--foreground);
+      }
+
+      .sidebar-footer {
+        display: grid;
+        gap: 10px;
+      }
+
+      .content-shell {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
       .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        padding: 18px 24px;
-        border-bottom: 1px solid #27241f;
-        background: #11131a;
+        min-height: 66px;
+        padding: 14px 22px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(9, 9, 11, 0.92);
+        backdrop-filter: blur(10px);
       }
 
-      h1,
-      h2,
-      h3,
-      p {
-        margin: 0;
-      }
-
-      h1 {
-        font-size: 18px;
-        color: #b98b57;
-        text-transform: uppercase;
+      .topbar h2 {
+        font-size: 17px;
+        font-weight: 700;
       }
 
       main {
-        width: min(1280px, calc(100vw - 32px));
-        margin: 24px auto 40px;
-        display: grid;
-        gap: 18px;
+        min-width: 0;
+        padding: 22px;
       }
 
       .status {
-        min-height: 22px;
-        color: #d8c6a6;
-        font-size: 14px;
+        min-height: 20px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .section {
+        display: none;
+        min-width: 0;
+      }
+
+      .section.active {
+        display: grid;
+        gap: 16px;
+      }
+
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .section-header h2 {
+        font-size: 22px;
+      }
+
+      .section-header p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
       }
 
       .panel {
-        border: 1px solid #302c27;
-        background: #11131a;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--card);
       }
 
       .panel-header {
@@ -142,12 +283,12 @@
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        padding: 16px;
-        border-bottom: 1px solid #27241f;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
       }
 
-      .panel-header h2 {
-        font-size: 16px;
+      .panel-header h3 {
+        font-size: 15px;
       }
 
       .panel-body {
@@ -157,7 +298,7 @@
       .grid-two {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 18px;
+        gap: 14px;
       }
 
       .grid-three {
@@ -166,31 +307,116 @@
         gap: 12px;
       }
 
+      .maps-layout {
+        display: grid;
+        grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+
       .list {
         display: grid;
-        gap: 10px;
-        margin-top: 14px;
+        gap: 8px;
+      }
+
+      .map-list {
+        max-height: calc(100vh - 210px);
+        overflow: auto;
       }
 
       .item {
+        width: 100%;
         display: grid;
         gap: 6px;
-        border: 1px solid #27241f;
-        background: #0d0f14;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: #0b0b0d;
         padding: 12px;
+        text-align: left;
+      }
+
+      .item.active {
+        border-color: var(--ring);
+        background: var(--card-strong);
       }
 
       .item strong {
-        color: #f0e6d4;
+        color: var(--foreground);
       }
 
-      .item small {
-        color: #9f9484;
-      }
-
+      .item small,
       .map-summary {
-        color: #bfb3a1;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        border-bottom: 1px solid var(--border);
+        padding: 10px;
+      }
+
+      .tab-button {
+        min-height: 34px;
+        border-color: transparent;
+        background: transparent;
+        color: var(--muted);
+      }
+
+      .tab-button.active {
+        border-color: var(--border);
+        background: var(--card-strong);
+        color: var(--foreground);
+      }
+
+      .tab-panel {
+        display: none;
+        padding: 16px;
+      }
+
+      .tab-panel.active {
+        display: grid;
+        gap: 14px;
+      }
+
+      .media-controls {
+        display: grid;
+        gap: 14px;
+      }
+
+      .image-drop {
+        display: grid;
+        gap: 10px;
+        border: 1px dashed #3f3f46;
+        border-radius: var(--radius);
+        background: #0b0b0d;
+        padding: 16px;
+      }
+
+      .image-drop input {
+        background: transparent;
+      }
+
+      .background-preview {
+        min-height: 180px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: #0b0b0d;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        color: var(--muted-foreground);
         font-size: 13px;
+      }
+
+      .background-preview img {
+        width: 100%;
+        height: 100%;
+        max-height: 360px;
+        object-fit: contain;
+        display: block;
       }
 
       .migration-row {
@@ -198,21 +424,23 @@
         grid-template-columns: 1fr auto auto;
         align-items: center;
         gap: 12px;
-        border: 1px solid #27241f;
-        background: #0d0f14;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: #0b0b0d;
         padding: 12px;
       }
 
       .badge {
-        border: 1px solid #3b332b;
-        color: #bfb3a1;
-        padding: 5px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+        padding: 4px 9px;
         font-size: 12px;
       }
 
       .badge.ok {
-        border-color: rgba(104, 155, 115, 0.55);
-        color: #a9d6b1;
+        border-color: rgba(34, 197, 94, 0.5);
+        color: #86efac;
       }
 
       .editor-shell {
@@ -226,7 +454,7 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
       }
 
       .editor-actions {
@@ -235,12 +463,15 @@
 
       .segmented {
         display: inline-flex;
-        border: 1px solid #302c27;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 7px;
       }
 
       .segmented button {
         border: 0;
-        border-right: 1px solid #302c27;
+        border-right: 1px solid var(--border);
+        border-radius: 0;
       }
 
       .segmented button:last-child {
@@ -248,17 +479,18 @@
       }
 
       .segmented button.active {
-        background: #b98b57;
-        color: #120e0a;
-        font-weight: 700;
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-weight: 650;
       }
 
       .map-editor-canvas {
         width: 100%;
-        height: min(66vh, 680px);
-        min-height: 420px;
-        border: 1px solid #302c27;
-        background: #0d0f14;
+        height: min(62vh, 680px);
+        min-height: 430px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: #0b0b0d;
         display: block;
         cursor: crosshair;
       }
@@ -272,28 +504,69 @@
       .teleport-list {
         display: grid;
         gap: 8px;
-        max-height: 260px;
+        max-height: 300px;
         overflow: auto;
       }
 
       .teleport-row {
         display: grid;
-        gap: 6px;
-        border: 1px solid #27241f;
-        background: #0d0f14;
+        gap: 7px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: #0b0b0d;
         padding: 10px;
       }
 
-      @media (max-width: 860px) {
-        .grid-two,
-        .grid-three,
+      .empty-state {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--card);
+        padding: 24px;
+        color: var(--muted);
+      }
+
+      @media (max-width: 1040px) {
+        .app-shell,
+        .maps-layout,
         .editor-shell {
           grid-template-columns: 1fr;
         }
 
-        .topbar {
+        .sidebar {
+          position: static;
+          height: auto;
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .side-nav {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .map-list {
+          max-height: none;
+        }
+      }
+
+      @media (max-width: 720px) {
+        main {
+          padding: 16px;
+        }
+
+        .topbar,
+        .section-header,
+        .panel-header {
           align-items: flex-start;
           flex-direction: column;
+        }
+
+        .grid-two,
+        .grid-three {
+          grid-template-columns: 1fr;
+        }
+
+        .side-nav {
+          grid-template-columns: 1fr;
         }
       }
     </style>
@@ -312,235 +585,327 @@
     </section>
 
     <section class="manager-app">
-      <header class="topbar">
-        <div>
-          <h1>Gerente do jogo</h1>
-          <p class="status" data-status></p>
-        </div>
-        <button type="button" data-logout>Bloquear</button>
-      </header>
+      <div class="app-shell">
+        <aside class="sidebar">
+          <div class="brand">
+            <h1>Vigilia dos Portoes</h1>
+            <span>Painel de gerente</span>
+          </div>
 
-      <main>
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Migrations</h2>
+          <nav class="side-nav" aria-label="Navegacao do gerente">
+            <button class="nav-button" type="button" data-manager-section="game">Jogo</button>
+            <button class="nav-button active" type="button" data-manager-section="maps">Mapas</button>
+            <button class="nav-button" type="button" data-manager-section="races">Racas</button>
+            <button class="nav-button" type="button" data-manager-section="classes">Classes</button>
+            <button class="nav-button" type="button" data-manager-section="equips">Equips</button>
+            <button class="nav-button" type="button" data-manager-section="buildings">Construcoes</button>
+            <button class="nav-button" type="button" data-manager-section="migrations">Migrations</button>
+          </nav>
+
+          <div class="sidebar-footer">
+            <p class="status" data-status></p>
+            <button type="button" data-logout>Bloquear</button>
+          </div>
+        </aside>
+
+        <div class="content-shell">
+          <header class="topbar">
             <div>
-              <button type="button" data-refresh-migrations>Atualizar</button>
-              <button class="primary" type="button" data-apply-pending>Aplicar pendentes</button>
+              <h2 data-section-title>Mapas</h2>
+              <p class="status">Gerencie dados, mapa visual e regras por area.</p>
             </div>
-          </div>
-          <div class="panel-body">
-            <div class="list" data-migration-list></div>
-          </div>
-        </section>
+          </header>
 
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Jogo</h2>
-            <button class="primary" type="submit" form="settings-form">Salvar</button>
-          </div>
-          <div class="panel-body">
-            <form class="form-grid" id="settings-form" data-settings-form>
-              <div class="grid-two">
-                <label>
-                  Nome do jogo
-                  <input name="gameName" required minlength="3" maxlength="80" />
-                </label>
-                <label>
-                  Mapa inicial
-                  <select name="defaultMapId" data-map-select required></select>
-                </label>
-              </div>
-            </form>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Mapas</h2>
-            <button class="primary" type="submit" form="map-form">Salvar mapa</button>
-          </div>
-          <div class="panel-body">
-            <form class="form-grid" id="map-form" data-map-form>
-              <input name="id" type="hidden" />
-              <div class="grid-three">
-                <label>
-                  Nome
-                  <input name="name" required minlength="3" maxlength="80" />
-                </label>
-                <label>
-                  Colunas
-                  <input name="widthCells" type="number" min="10" max="5000" required />
-                </label>
-                <label>
-                  Linhas
-                  <input name="heightCells" type="number" min="10" max="5000" required />
-                </label>
-                <label>
-                  Tamanho da celula
-                  <input name="cellSize" type="number" min="16" max="128" required />
-                </label>
-                <label>
-                  Personagem na celula
-                  <input name="characterSize" type="number" min="16" max="256" required />
-                </label>
-                <label>
-                  Coluna de entrada
-                  <input name="entryColumn" type="number" min="1" max="5000" required />
-                </label>
-                <label>
-                  Linha de entrada
-                  <input name="entryRow" type="number" min="1" max="5000" required />
-                </label>
-                <label>
-                  Cor de fundo
-                  <input name="backgroundColor" type="color" required />
-                </label>
-                <label>
-                  Norte leva para
-                  <select name="northMapId" data-map-exit></select>
-                </label>
-                <label>
-                  Leste leva para
-                  <select name="eastMapId" data-map-exit></select>
-                </label>
-                <label>
-                  Sul leva para
-                  <select name="southMapId" data-map-exit></select>
-                </label>
-                <label>
-                  Oeste leva para
-                  <select name="westMapId" data-map-exit></select>
-                </label>
-              </div>
-            </form>
-            <div class="list" data-map-list></div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <h2>Editor de mapa</h2>
-            <div class="editor-actions">
-              <button type="button" data-editor-zoom-out>-</button>
-              <button type="button" data-editor-zoom-in>+</button>
-              <button class="primary" type="button" data-editor-save>Salvar editor</button>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="editor-shell">
-              <div class="form-grid">
-                <div class="editor-toolbar">
-                  <label>
-                    Mapa
-                    <select data-editor-map></select>
-                  </label>
-                  <div class="segmented" role="group" aria-label="Modo do editor">
-                    <button class="active" type="button" data-editor-mode="collision">Colisao</button>
-                    <button type="button" data-editor-mode="teleport">Teleporte</button>
-                    <button type="button" data-editor-mode="pan">Mover</button>
-                  </div>
-                  <label>
-                    Background
-                    <input type="file" accept="image/png,image/jpeg,image/webp" data-editor-background />
-                  </label>
+          <main>
+            <section class="section" data-section="game">
+              <div class="section-header">
+                <div>
+                  <h2>Jogo</h2>
+                  <p>Configuracoes gerais do mundo.</p>
                 </div>
-                <canvas class="map-editor-canvas" data-map-editor width="960" height="620"></canvas>
+                <button class="primary" type="submit" form="settings-form">Salvar</button>
               </div>
 
-              <aside class="editor-side">
-                <form class="compact-form" data-teleport-form>
-                  <input name="id" type="hidden" />
-                  <div class="grid-two">
-                    <label>
-                      Origem col
-                      <input name="column" type="number" min="1" required />
-                    </label>
-                    <label>
-                      Origem lin
-                      <input name="row" type="number" min="1" required />
-                    </label>
-                  </div>
-                  <label>
-                    Mapa destino
-                    <select name="targetMapId" data-teleport-target required></select>
-                  </label>
-                  <div class="grid-two">
-                    <label>
-                      Destino col
-                      <input name="targetColumn" type="number" min="1" required />
-                    </label>
-                    <label>
-                      Destino lin
-                      <input name="targetRow" type="number" min="1" required />
-                    </label>
-                  </div>
-                  <button class="primary" type="submit">Salvar teleporte</button>
-                </form>
-                <div class="teleport-list" data-teleport-list></div>
-              </aside>
-            </div>
-          </div>
-        </section>
+              <section class="panel">
+                <div class="panel-body">
+                  <form class="form-grid" id="settings-form" data-settings-form>
+                    <div class="grid-two">
+                      <label>
+                        Nome do jogo
+                        <input name="gameName" required minlength="3" maxlength="80" />
+                      </label>
+                      <label>
+                        Mapa inicial
+                        <select name="defaultMapId" data-map-select required></select>
+                      </label>
+                    </div>
+                  </form>
+                </div>
+              </section>
+            </section>
 
-        <div class="grid-two">
-          <section class="panel">
-            <div class="panel-header">
-              <h2>Racas</h2>
-              <button class="primary" type="submit" form="race-form">Salvar raca</button>
-            </div>
-            <div class="panel-body">
-              <form class="compact-form" id="race-form" data-taxonomy-form="races">
-                <input name="id" type="hidden" />
-                <label>
-                  Nome
-                  <input name="name" required minlength="2" maxlength="60" />
-                </label>
-                <label>
-                  Descricao
-                  <textarea name="description"></textarea>
-                </label>
-                <label>
-                  Status
-                  <select name="isActive">
-                    <option value="true">Ativa</option>
-                    <option value="false">Inativa</option>
-                  </select>
-                </label>
-              </form>
-              <div class="list" data-list="races"></div>
-            </div>
-          </section>
+            <section class="section active" data-section="maps">
+              <div class="section-header">
+                <div>
+                  <h2>Mapas</h2>
+                  <p>Selecione um mapa para editar configuracoes, imagem, colisoes e teleportes.</p>
+                </div>
+                <button class="primary" type="submit" form="map-form">Salvar mapa</button>
+              </div>
 
-          <section class="panel">
-            <div class="panel-header">
-              <h2>Classes</h2>
-              <button class="primary" type="submit" form="class-form">Salvar classe</button>
-            </div>
-            <div class="panel-body">
-              <form class="compact-form" id="class-form" data-taxonomy-form="classes">
-                <input name="id" type="hidden" />
-                <label>
-                  Nome
-                  <input name="name" required minlength="2" maxlength="60" />
-                </label>
-                <label>
-                  Descricao
-                  <textarea name="description"></textarea>
-                </label>
-                <label>
-                  Status
-                  <select name="isActive">
-                    <option value="true">Ativa</option>
-                    <option value="false">Inativa</option>
-                  </select>
-                </label>
-              </form>
-              <div class="list" data-list="classes"></div>
-            </div>
-          </section>
+              <div class="maps-layout">
+                <section class="panel">
+                  <div class="panel-header">
+                    <h3>Lista</h3>
+                    <button type="button" data-new-map>Novo</button>
+                  </div>
+                  <div class="panel-body">
+                    <div class="list map-list" data-map-list></div>
+                  </div>
+                </section>
+
+                <section class="panel">
+                  <div class="tabs" role="tablist" aria-label="Informacoes do mapa">
+                    <button class="tab-button active" type="button" data-map-tab="settings">Configuracoes</button>
+                    <button class="tab-button" type="button" data-map-tab="visual">Visual</button>
+                    <button class="tab-button" type="button" data-map-tab="editor">Editor</button>
+                    <button class="tab-button" type="button" data-map-tab="teleports">Teleportes</button>
+                  </div>
+
+                  <div class="tab-panel active" data-map-tab-panel="settings">
+                    <form class="form-grid" id="map-form" data-map-form>
+                      <input name="id" type="hidden" />
+                      <div class="grid-three">
+                        <label>
+                          Nome
+                          <input name="name" required minlength="3" maxlength="80" />
+                        </label>
+                        <label>
+                          Colunas
+                          <input name="widthCells" type="number" min="10" max="5000" required />
+                        </label>
+                        <label>
+                          Linhas
+                          <input name="heightCells" type="number" min="10" max="5000" required />
+                        </label>
+                        <label>
+                          Tamanho da celula
+                          <input name="cellSize" type="number" min="16" max="128" required />
+                        </label>
+                        <label>
+                          Personagem na celula
+                          <input name="characterSize" type="number" min="16" max="256" required />
+                        </label>
+                        <label>
+                          Coluna de entrada
+                          <input name="entryColumn" type="number" min="1" max="5000" required />
+                        </label>
+                        <label>
+                          Linha de entrada
+                          <input name="entryRow" type="number" min="1" max="5000" required />
+                        </label>
+                        <label>
+                          Cor de fundo
+                          <input name="backgroundColor" type="color" required />
+                        </label>
+                        <label>
+                          Norte leva para
+                          <select name="northMapId" data-map-exit></select>
+                        </label>
+                        <label>
+                          Leste leva para
+                          <select name="eastMapId" data-map-exit></select>
+                        </label>
+                        <label>
+                          Sul leva para
+                          <select name="southMapId" data-map-exit></select>
+                        </label>
+                        <label>
+                          Oeste leva para
+                          <select name="westMapId" data-map-exit></select>
+                        </label>
+                      </div>
+                    </form>
+                  </div>
+
+                  <div class="tab-panel" data-map-tab-panel="visual">
+                    <div class="media-controls">
+                      <label class="image-drop">
+                        Background do mapa
+                        <input type="file" accept="image/png,image/jpeg,image/webp" data-editor-background />
+                      </label>
+                      <div class="background-preview" data-background-preview>Nenhuma imagem vinculada.</div>
+                    </div>
+                  </div>
+
+                  <div class="tab-panel" data-map-tab-panel="editor">
+                    <div class="form-grid">
+                      <div class="editor-toolbar">
+                        <label>
+                          Mapa
+                          <select data-editor-map></select>
+                        </label>
+                        <div class="segmented" role="group" aria-label="Modo do editor">
+                          <button class="active" type="button" data-editor-mode="collision">Colisao</button>
+                          <button type="button" data-editor-mode="teleport">Teleporte</button>
+                          <button type="button" data-editor-mode="pan">Mover</button>
+                        </div>
+                        <div class="editor-actions">
+                          <button type="button" data-editor-zoom-out>-</button>
+                          <button type="button" data-editor-zoom-in>+</button>
+                          <button class="primary" type="button" data-editor-save>Salvar editor</button>
+                        </div>
+                      </div>
+                      <canvas class="map-editor-canvas" data-map-editor width="960" height="620"></canvas>
+                    </div>
+                  </div>
+
+                  <div class="tab-panel" data-map-tab-panel="teleports">
+                    <div class="editor-shell">
+                      <aside class="editor-side">
+                        <form class="compact-form" data-teleport-form>
+                          <input name="id" type="hidden" />
+                          <div class="grid-two">
+                            <label>
+                              Origem col
+                              <input name="column" type="number" min="1" required />
+                            </label>
+                            <label>
+                              Origem lin
+                              <input name="row" type="number" min="1" required />
+                            </label>
+                          </div>
+                          <label>
+                            Mapa destino
+                            <select name="targetMapId" data-teleport-target required></select>
+                          </label>
+                          <div class="grid-two">
+                            <label>
+                              Destino col
+                              <input name="targetColumn" type="number" min="1" required />
+                            </label>
+                            <label>
+                              Destino lin
+                              <input name="targetRow" type="number" min="1" required />
+                            </label>
+                          </div>
+                          <button class="primary" type="submit">Salvar teleporte</button>
+                        </form>
+                      </aside>
+                      <div class="teleport-list" data-teleport-list></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <section class="section" data-section="races">
+              <div class="section-header">
+                <div>
+                  <h2>Racas</h2>
+                  <p>Cadastro de racas disponiveis para personagens.</p>
+                </div>
+                <button class="primary" type="submit" form="race-form">Salvar raca</button>
+              </div>
+              <section class="panel">
+                <div class="panel-body grid-two">
+                  <form class="compact-form" id="race-form" data-taxonomy-form="races">
+                    <input name="id" type="hidden" />
+                    <label>
+                      Nome
+                      <input name="name" required minlength="2" maxlength="60" />
+                    </label>
+                    <label>
+                      Descricao
+                      <textarea name="description"></textarea>
+                    </label>
+                    <label>
+                      Status
+                      <select name="isActive">
+                        <option value="true">Ativa</option>
+                        <option value="false">Inativa</option>
+                      </select>
+                    </label>
+                  </form>
+                  <div class="list" data-list="races"></div>
+                </div>
+              </section>
+            </section>
+
+            <section class="section" data-section="classes">
+              <div class="section-header">
+                <div>
+                  <h2>Classes</h2>
+                  <p>Cadastro de classes disponiveis para personagens.</p>
+                </div>
+                <button class="primary" type="submit" form="class-form">Salvar classe</button>
+              </div>
+              <section class="panel">
+                <div class="panel-body grid-two">
+                  <form class="compact-form" id="class-form" data-taxonomy-form="classes">
+                    <input name="id" type="hidden" />
+                    <label>
+                      Nome
+                      <input name="name" required minlength="2" maxlength="60" />
+                    </label>
+                    <label>
+                      Descricao
+                      <textarea name="description"></textarea>
+                    </label>
+                    <label>
+                      Status
+                      <select name="isActive">
+                        <option value="true">Ativa</option>
+                        <option value="false">Inativa</option>
+                      </select>
+                    </label>
+                  </form>
+                  <div class="list" data-list="classes"></div>
+                </div>
+              </section>
+            </section>
+
+            <section class="section" data-section="equips">
+              <div class="section-header">
+                <div>
+                  <h2>Equips</h2>
+                  <p>Area reservada para equipamentos.</p>
+                </div>
+              </div>
+              <div class="empty-state">Modulo ainda nao conectado ao servidor.</div>
+            </section>
+
+            <section class="section" data-section="buildings">
+              <div class="section-header">
+                <div>
+                  <h2>Construcoes</h2>
+                  <p>Area reservada para construcoes.</p>
+                </div>
+              </div>
+              <div class="empty-state">Modulo ainda nao conectado ao servidor.</div>
+            </section>
+
+            <section class="section" data-section="migrations">
+              <div class="section-header">
+                <div>
+                  <h2>Migrations</h2>
+                  <p>Controle de schema e atualizacoes do banco.</p>
+                </div>
+                <div class="editor-actions">
+                  <button type="button" data-refresh-migrations>Atualizar</button>
+                  <button class="primary" type="button" data-apply-pending>Aplicar pendentes</button>
+                </div>
+              </div>
+
+              <section class="panel">
+                <div class="panel-body">
+                  <div class="list" data-migration-list></div>
+                </div>
+              </section>
+            </section>
+          </main>
         </div>
-      </main>
+      </div>
     </section>
 
     <script src="manager.js"></script>
