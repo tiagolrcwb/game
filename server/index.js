@@ -12,7 +12,7 @@ const PLAYER_SIZE = 24;
 const PLAYER_SPEED = 5;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
-const APP_VERSION = '2026-06-03-map-runtime-2';
+const APP_VERSION = '2026-06-03-map-runtime-3';
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
@@ -58,6 +58,12 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'GET' && request.url === '/api/version') {
       sendJson(response, 200, { version: APP_VERSION });
+      return;
+    }
+
+    if (request.method === 'GET' && request.url === '/api/game-config') {
+      await reloadGameConfig();
+      sendJson(response, 200, createGameConfigPayload(gameConfig.map));
       return;
     }
 
@@ -177,6 +183,8 @@ async function handleManagerRequest(request, response) {
     await reloadGameConfig();
     if (mapId) {
       resetPlayersOnMapEntry(mapId);
+    } else {
+      resetPlayersToDefaultMapEntry();
     }
     broadcastGameState();
     sendJson(response, 200, await getManagerState());
@@ -876,6 +884,14 @@ function createGameStateMessage(viewer) {
 
   return {
     type: 'state',
+    ...createGameConfigPayload(map),
+    players: visiblePlayers,
+  };
+}
+
+function createGameConfigPayload(map) {
+  return {
+    version: APP_VERSION,
     game: {
       name: gameConfig.gameName,
     },
@@ -894,7 +910,6 @@ function createGameStateMessage(viewer) {
       mapName: map.name,
       exits: map.exits,
     },
-    players: visiblePlayers,
   };
 }
 

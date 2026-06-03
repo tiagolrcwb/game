@@ -90,6 +90,8 @@ let reconnectId = null;
 let reconnectAttempts = 0;
 
 connectSocket();
+loadGameConfig();
+setInterval(loadGameConfig, 7000);
 
 function connectSocket() {
   clearTimeout(reconnectId);
@@ -152,10 +154,28 @@ function applyStateMessage(message) {
     }
   }
 
+  if (!Array.isArray(message.players)) {
+    return;
+  }
+
   players.clear();
 
   for (const player of message.players) {
     players.set(player.id, player);
+  }
+}
+
+async function loadGameConfig() {
+  try {
+    const response = await fetch('/api/game-config', { cache: 'no-store' });
+
+    if (!response.ok) {
+      return;
+    }
+
+    applyStateMessage(await response.json());
+  } catch {
+    // WebSocket state remains the primary source while HTTP config is unavailable.
   }
 }
 
