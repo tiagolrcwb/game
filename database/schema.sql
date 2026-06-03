@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 CREATE TABLE IF NOT EXISTS users (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   username VARCHAR(20) NOT NULL,
+  level TINYINT UNSIGNED NOT NULL DEFAULT 3,
   password_hash VARCHAR(255) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS maps (
   height_cells INT UNSIGNED NOT NULL DEFAULT 1000,
   cell_size INT UNSIGNED NOT NULL DEFAULT 32,
   character_size INT UNSIGNED NOT NULL DEFAULT 64,
+  movement_speed DECIMAL(5,2) NOT NULL DEFAULT 5.00,
   entry_column INT UNSIGNED NOT NULL DEFAULT 1,
   entry_row INT UNSIGNED NOT NULL DEFAULT 1,
   background_color VARCHAR(20) NOT NULL DEFAULT '#15161d',
@@ -84,8 +86,8 @@ CREATE TABLE IF NOT EXISTS character_classes (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO maps (id, name, width_cells, height_cells, cell_size, character_size, entry_column, entry_row)
-VALUES (1, 'Mapa Inicial', 1000, 1000, 32, 64, 500, 500)
+INSERT INTO maps (id, name, width_cells, height_cells, cell_size, character_size, movement_speed, entry_column, entry_row)
+VALUES (1, 'Mapa Inicial', 1000, 1000, 32, 64, 5.00, 500, 500)
 ON DUPLICATE KEY UPDATE id = id;
 
 INSERT INTO game_settings (id, game_name, default_map_id)

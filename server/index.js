@@ -9,7 +9,6 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8080;
 const PLAYER_SIZE = 24;
-const PLAYER_SPEED = 5;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 12 * 1024 * 1024;
@@ -30,6 +29,7 @@ const DEFAULT_GAME_CONFIG = {
     heightCells: 1000,
     cellSize: 32,
     characterSize: 64,
+    movementSpeed: 5,
     entryColumn: 500,
     entryRow: 500,
     backgroundColor: '#15161d',
@@ -197,6 +197,17 @@ async function handleManagerRequest(request, response) {
     } else {
       resetPlayersToDefaultMapEntry();
     }
+    await broadcastGameState();
+    sendJson(response, 200, await getManagerState());
+    return;
+  }
+
+  const deleteMapMatch = url.pathname.match(/^\/api\/manager\/maps\/(\d+)$/);
+
+  if (request.method === 'DELETE' && deleteMapMatch) {
+    await deleteMap(toPositiveInt(deleteMapMatch[1], 'Mapa invalido.'));
+    await reloadGameConfig();
+    resetPlayersToDefaultMapEntry();
     await broadcastGameState();
     sendJson(response, 200, await getManagerState());
     return;
@@ -414,6 +425,7 @@ async function saveMap(body) {
     heightCells,
     cellSize: toBoundedInt(body.cellSize, 16, 128, 'Tamanho da celula invalido.'),
     characterSize: toBoundedInt(body.characterSize, 16, 256, 'Tamanho do personagem invalido.'),
+    movementSpeed: toBoundedFloat(body.movementSpeed || 5, 1, 20, 'Velocidade de deslocamento invalida.'),
     entryColumn: toBoundedInt(body.entryColumn, 1, widthCells, 'Coluna de entrada invalida.'),
     entryRow: toBoundedInt(body.entryRow, 1, heightCells, 'Linha de entrada invalida.'),
     backgroundColor: normalizeColor(body.backgroundColor, '#15161d'),
@@ -429,7 +441,7 @@ async function saveMap(body) {
     await db.execute(
       `UPDATE maps
         SET name = ?, width_cells = ?, height_cells = ?, cell_size = ?, character_size = ?,
-          entry_column = ?, entry_row = ?,
+          movement_speed = ?, entry_column = ?, entry_row = ?,
           background_color = ?, grid_color = ?, north_map_id = ?, east_map_id = ?,
           south_map_id = ?, west_map_id = ?
         WHERE id = ?`,
@@ -439,6 +451,7 @@ async function saveMap(body) {
         map.heightCells,
         map.cellSize,
         map.characterSize,
+        map.movementSpeed,
         map.entryColumn,
         map.entryRow,
         map.backgroundColor,
@@ -455,15 +468,16 @@ async function saveMap(body) {
 
   await db.execute(
     `INSERT INTO maps
-      (name, width_cells, height_cells, cell_size, character_size, entry_column, entry_row, background_color, grid_color,
+      (name, width_cells, height_cells, cell_size, character_size, movement_speed, entry_column, entry_row, background_color, grid_color,
         north_map_id, east_map_id, south_map_id, west_map_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       map.name,
       map.widthCells,
       map.heightCells,
       map.cellSize,
       map.characterSize,
+      map.movementSpeed,
       map.entryColumn,
       map.entryRow,
       map.backgroundColor,
@@ -474,6 +488,39 @@ async function saveMap(body) {
       map.westMapId,
     ],
   );
+}
+
+async function deleteMap(mapId) {
+  const [settingsRows] = await db.execute('SELECT default_map_id FROM game_settings WHERE id = 1 LIMIT 1');
+  const defaultMapId = Number(settingsRows[0]?.default_map_id || DEFAULT_GAME_CONFIG.map.id);
+
+  if (mapId === defaultMapId) {
+    throw Object.assign(new Error('Nao e possivel remover o mapa inicial do jogo.'), { statusCode: 400 });
+  }
+
+  const [mapRows] = await db.execute('SELECT id, background_image_path FROM maps WHERE id = ? LIMIT 1', [mapId]);
+
+  if (!mapRows[0]) {
+    throw Object.assign(new Error('Mapa nao encontrado.'), { statusCode: 404 });
+  }
+
+  const [countRows] = await db.execute('SELECT COUNT(*) AS total FROM maps');
+
+  if (Number(countRows[0]?.total || 0) <= 1) {
+    throw Object.assign(new Error('O jogo precisa manter pelo menos um mapa.'), { statusCode: 400 });
+  }
+
+  await db.execute(
+    `UPDATE maps
+      SET north_map_id = IF(north_map_id = ?, NULL, north_map_id),
+        east_map_id = IF(east_map_id = ?, NULL, east_map_id),
+        south_map_id = IF(south_map_id = ?, NULL, south_map_id),
+        west_map_id = IF(west_map_id = ?, NULL, west_map_id)`,
+    [mapId, mapId, mapId, mapId],
+  );
+  await db.execute('DELETE FROM maps WHERE id = ?', [mapId]);
+  mapDataCache.delete(mapId);
+  deleteMapAssetFiles(mapId, mapRows[0].background_image_path);
 }
 
 async function ensureMapIdsExist(ids) {
@@ -514,6 +561,24 @@ function getMapDataFilePath(mapId) {
   return path.join(MAP_DATA_DIR, `map-${mapId}.json`);
 }
 
+function deleteMapAssetFiles(mapId, backgroundImagePath) {
+  const dataFilePath = getMapDataFilePath(mapId);
+
+  if (fs.existsSync(dataFilePath)) {
+    fs.unlinkSync(dataFilePath);
+  }
+
+  if (!backgroundImagePath) {
+    return;
+  }
+
+  const backgroundFilePath = path.resolve(CLIENT_DIR, `.${backgroundImagePath}`);
+
+  if (backgroundFilePath.startsWith(`${MAP_BACKGROUND_DIR}${path.sep}`) && fs.existsSync(backgroundFilePath)) {
+    fs.unlinkSync(backgroundFilePath);
+  }
+}
+
 function createDefaultMapData(map) {
   return {
     version: 1,
@@ -521,6 +586,8 @@ function createDefaultMapData(map) {
     heightCells: map.heightCells,
     blockedCells: [],
     teleportPoints: [],
+    speedAreas: [],
+    levelCurve: createDefaultLevelCurve(map),
   };
 }
 
@@ -564,6 +631,9 @@ function normalizeMapData(data, map) {
   const teleportPoints = Array.isArray(data.teleportPoints)
     ? data.teleportPoints.map((point) => normalizeTeleportPoint(point, map)).filter(Boolean)
     : [];
+  const speedAreas = Array.isArray(data.speedAreas)
+    ? data.speedAreas.map((area) => normalizeSpeedArea(area, map)).filter(Boolean)
+    : [];
 
   return {
     version: 1,
@@ -571,7 +641,60 @@ function normalizeMapData(data, map) {
     heightCells: map.heightCells,
     blockedCells,
     teleportPoints,
+    speedAreas,
+    levelCurve: normalizeLevelCurve(data.levelCurve, map),
   };
+}
+
+function normalizeSpeedArea(area, map) {
+  const column = Number(area?.column);
+  const row = Number(area?.row);
+  const width = Number(area?.width);
+  const height = Number(area?.height);
+  const multiplier = Number(area?.multiplier);
+
+  if (
+    !Number.isInteger(column) ||
+    !Number.isInteger(row) ||
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    !isCellKeyInsideMap(`${column},${row}`, map)
+  ) {
+    return null;
+  }
+
+  return {
+    id: String(area.id || crypto.randomUUID()),
+    column,
+    row,
+    width: clamp(width, 1, map.widthCells - column + 1),
+    height: clamp(height, 1, map.heightCells - row + 1),
+    multiplier: clamp(Number.isFinite(multiplier) ? multiplier : 1, 0.2, 3),
+  };
+}
+
+function createDefaultLevelCurve(map) {
+  const baseSize = Number(map.characterSize) || DEFAULT_GAME_CONFIG.map.characterSize;
+
+  return [
+    Math.max(16, Math.round(baseSize * 0.8)),
+    Math.max(16, Math.round(baseSize * 0.9)),
+    Math.max(16, Math.round(baseSize)),
+    Math.max(16, Math.round(baseSize * 1.1)),
+    Math.max(16, Math.round(baseSize * 1.2)),
+  ];
+}
+
+function normalizeLevelCurve(value, map) {
+  const fallback = createDefaultLevelCurve(map);
+  const source = Array.isArray(value) ? value : [];
+
+  return fallback.map((defaultSize, index) => {
+    const size = Number(source[index]);
+    return Number.isInteger(size) && size >= 16 && size <= 256 ? size : defaultSize;
+  });
 }
 
 function normalizeCellKey(value) {
@@ -682,6 +805,7 @@ function mapMapRow(row) {
     heightCells: row.height_cells,
     cellSize: row.cell_size,
     characterSize: row.character_size,
+    movementSpeed: Number(row.movement_speed || 5),
     entryColumn: row.entry_column,
     entryRow: row.entry_row,
     backgroundColor: row.background_color,
@@ -796,6 +920,16 @@ function toBoundedInt(value, min, max, message) {
   return number;
 }
 
+function toBoundedFloat(value, min, max, message) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number) || number < min || number > max) {
+    throw Object.assign(new Error(message), { statusCode: 400 });
+  }
+
+  return Math.round(number * 100) / 100;
+}
+
 function nullablePositiveInt(value) {
   if (value === null || value === undefined || value === '') {
     return null;
@@ -827,8 +961,8 @@ async function register(request, response) {
       [username, passwordHash],
     );
 
-    const token = createToken({ id: result.insertId, username });
-    sendJson(response, 201, { token, user: { id: result.insertId, username } });
+    const token = createToken({ id: result.insertId, username, level: 3 });
+    sendJson(response, 201, { token, user: { id: result.insertId, username, level: 3 } });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
       sendJson(response, 409, { error: 'Esse nome de usuario ja esta em uso.' });
@@ -844,12 +978,7 @@ async function login(request, response) {
   const username = String(body.username || '').trim();
   const password = String(body.password || '');
 
-  const [rows] = await db.execute(
-    'SELECT id, username, password_hash FROM users WHERE username = ? LIMIT 1',
-    [username],
-  );
-
-  const user = rows[0];
+  const user = await getLoginUser(username);
   const isPasswordValid = user ? await bcrypt.compare(password, user.password_hash) : false;
 
   if (!user || !isPasswordValid) {
@@ -857,8 +986,29 @@ async function login(request, response) {
     return;
   }
 
-  const token = createToken({ id: user.id, username: user.username });
-  sendJson(response, 200, { token, user: { id: user.id, username: user.username } });
+  const level = clamp(Number(user.level || 3), 1, 5);
+  const token = createToken({ id: user.id, username: user.username, level });
+  sendJson(response, 200, { token, user: { id: user.id, username: user.username, level } });
+}
+
+async function getLoginUser(username) {
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, username, level, password_hash FROM users WHERE username = ? LIMIT 1',
+      [username],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    if (error.code !== 'ER_BAD_FIELD_ERROR') {
+      throw error;
+    }
+
+    const [rows] = await db.execute(
+      'SELECT id, username, password_hash FROM users WHERE username = ? LIMIT 1',
+      [username],
+    );
+    return rows[0] ? { ...rows[0], level: 3 } : null;
+  }
 }
 
 function createToken(user) {
@@ -991,6 +1141,7 @@ function createPlayer(id, user) {
     id,
     userId: user.id,
     username: user.username,
+    level: clamp(Number(user.level || 3), 1, 5),
     mapId: map.id,
     x: spawn.x,
     y: spawn.y,
@@ -1107,6 +1258,7 @@ function createGameConfigPayload(map, mapData = createDefaultMapData(map)) {
       heightCells: map.heightCells,
       cellSize: map.cellSize,
       characterSize: map.characterSize,
+      movementSpeed: map.movementSpeed,
       entryColumn: map.entryColumn,
       entryRow: map.entryRow,
       backgroundColor: map.backgroundColor,
@@ -1118,6 +1270,8 @@ function createGameConfigPayload(map, mapData = createDefaultMapData(map)) {
       exits: map.exits,
       blockedCells: mapData.blockedCells,
       teleportPoints: mapData.teleportPoints,
+      speedAreas: mapData.speedAreas,
+      levelCurve: mapData.levelCurve,
     },
   };
 }
@@ -1134,8 +1288,9 @@ async function handleMove(player, dx, dy) {
     player.direction = getPlayerDirection(normalizedDx, normalizedDy);
   }
 
-  const nextX = player.x + normalizedDx * PLAYER_SPEED;
-  const nextY = player.y + normalizedDy * PLAYER_SPEED;
+  const movementSpeed = getMovementSpeedForPlayer(player, map, mapData);
+  const nextX = player.x + normalizedDx * movementSpeed;
+  const nextY = player.y + normalizedDy * movementSpeed;
 
   if (!isBlockedPosition(nextX, nextY, map, mapData)) {
     player.x = nextX;
@@ -1152,6 +1307,25 @@ async function handleMove(player, dx, dy) {
 
   player.x = clamp(player.x, 0, getWorldWidth(map) - PLAYER_SIZE);
   player.y = clamp(player.y, 0, getWorldHeight(map) - PLAYER_SIZE);
+}
+
+function getMovementSpeedForPlayer(player, map, mapData) {
+  const cell = getCellFromPosition(player.x + PLAYER_SIZE / 2, player.y + PLAYER_SIZE / 2, map);
+  const speedArea = [...(mapData.speedAreas || [])]
+    .reverse()
+    .find((area) => isCellInsideRect(cell.column, cell.row, area));
+  const multiplier = speedArea ? Number(speedArea.multiplier || 1) : 1;
+
+  return clamp(Number(map.movementSpeed || 5) * multiplier, 0.5, 40);
+}
+
+function isCellInsideRect(column, row, rect) {
+  return (
+    column >= rect.column &&
+    column < rect.column + rect.width &&
+    row >= rect.row &&
+    row < rect.row + rect.height
+  );
 }
 
 function tryTeleportAtMapEdge(player, map) {

@@ -47,11 +47,14 @@ const DEFAULT_WORLD = {
   heightCells: 1000,
   cellSize: 32,
   characterSize: 64,
+  movementSpeed: 5,
   backgroundColor: '#15161d',
   backgroundImagePath: null,
   mapDataPath: '/assets/maps/data/map-1.json',
   blockedCells: [],
   teleportPoints: [],
+  speedAreas: [],
+  levelCurve: [51, 58, 64, 70, 77],
   gridColor: 'rgba(185, 139, 87, 0.08)',
   mapId: 1,
   mapName: 'Mapa Inicial',
@@ -152,8 +155,11 @@ function applyStateMessage(message) {
       heightCells: Number(message.world.heightCells) || DEFAULT_WORLD.heightCells,
       cellSize: Number(message.world.cellSize) || DEFAULT_WORLD.cellSize,
       characterSize: Number(message.world.characterSize) || DEFAULT_WORLD.characterSize,
+      movementSpeed: Number(message.world.movementSpeed) || DEFAULT_WORLD.movementSpeed,
       blockedCells: Array.isArray(message.world.blockedCells) ? message.world.blockedCells : [],
       teleportPoints: Array.isArray(message.world.teleportPoints) ? message.world.teleportPoints : [],
+      speedAreas: Array.isArray(message.world.speedAreas) ? message.world.speedAreas : [],
+      levelCurve: Array.isArray(message.world.levelCurve) ? message.world.levelCurve : DEFAULT_WORLD.levelCurve,
     };
 
     if (world.mapId !== previousMapId) {
@@ -448,11 +454,13 @@ function getScreenPlayer(player) {
 }
 
 function isPlayerVisible(player) {
+  const characterSize = getCharacterSize(player);
+
   return (
-    player.x > -world.characterSize &&
-    player.x < canvas.width + world.characterSize &&
-    player.y > -world.characterSize &&
-    player.y < canvas.height + world.characterSize
+    player.x > -characterSize &&
+    player.x < canvas.width + characterSize &&
+    player.y > -characterSize &&
+    player.y < canvas.height + characterSize
   );
 }
 
@@ -477,21 +485,28 @@ function renderSpriteCharacter(player) {
   const sprite = getCharacterSprite(player);
   const drawX = getCharacterDrawX(player);
   const drawY = getCharacterDrawY(player);
+  const characterSize = getCharacterSize(player);
 
   context.fillStyle = 'rgba(0, 0, 0, 0.34)';
   context.fillRect(player.x - 7, player.y + PLAYER_SIZE / 2 + 9, PLAYER_SIZE + 14, 6);
 
   context.save();
-  context.drawImage(sprite, drawX, drawY, world.characterSize, world.characterSize);
+  context.drawImage(sprite, drawX, drawY, characterSize, characterSize);
   context.restore();
 }
 
 function getCharacterDrawX(player) {
-  return Math.round(player.x + PLAYER_SIZE / 2 - world.characterSize / 2);
+  return Math.round(player.x + PLAYER_SIZE / 2 - getCharacterSize(player) / 2);
 }
 
 function getCharacterDrawY(player) {
-  return Math.round(player.y + PLAYER_SIZE / 2 - world.characterSize / 2);
+  return Math.round(player.y + PLAYER_SIZE / 2 - getCharacterSize(player) / 2);
+}
+
+function getCharacterSize(player) {
+  const level = clamp(Number(player.level || 3), 1, 5);
+  const size = Number(world.levelCurve[level - 1]);
+  return Number.isFinite(size) ? size : world.characterSize;
 }
 
 function getCharacterSprite(player) {

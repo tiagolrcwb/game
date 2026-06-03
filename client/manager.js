@@ -27,8 +27,12 @@ const teleportForm = document.querySelector('[data-teleport-form]');
 const teleportTargetSelect = document.querySelector('[data-teleport-target]');
 const teleportList = document.querySelector('[data-teleport-list]');
 const newMapButton = document.querySelector('[data-new-map]');
+const deleteMapButton = document.querySelector('[data-delete-map]');
 const mapTabButtons = document.querySelectorAll('[data-map-tab]');
 const mapTabPanels = document.querySelectorAll('[data-map-tab-panel]');
+const speedAreaForm = document.querySelector('[data-speed-area-form]');
+const speedAreaList = document.querySelector('[data-speed-area-list]');
+const levelCurveForm = document.querySelector('[data-level-curve-form]');
 
 let managerToken = localStorage.getItem('managerToken') || '';
 let state = {
@@ -109,6 +113,8 @@ newMapButton.addEventListener('click', () => {
   setMapTab('settings');
 });
 
+deleteMapButton.addEventListener('click', deleteSelectedMap);
+
 settingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await save('/api/manager/settings', 'PUT', formToObject(settingsForm));
@@ -150,6 +156,16 @@ for (const button of editorModeButtons) {
 teleportForm.addEventListener('submit', (event) => {
   event.preventDefault();
   upsertTeleportPoint(formToObject(teleportForm));
+});
+
+speedAreaForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  upsertSpeedArea(formToObject(speedAreaForm));
+});
+
+levelCurveForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveLevelCurve(formToObject(levelCurveForm));
 });
 
 editorCanvas.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -255,6 +271,38 @@ async function save(url, method, payload) {
   setStatus('Salvo.');
 }
 
+async function deleteSelectedMap() {
+  const map = getSelectedMap();
+
+  if (!map) {
+    setStatus('Selecione um mapa para remover.');
+    return;
+  }
+
+  if (!window.confirm(`Remover o mapa "${map.name}"?`)) {
+    return;
+  }
+
+  setStatus('Removendo mapa...');
+  const response = await fetch(`/api/manager/maps/${encodeURIComponent(map.id)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    setStatus(data.error || 'Nao foi possivel remover o mapa.');
+    return;
+  }
+
+  state = data;
+  selectedMapId = state.settings.defaultMapId || state.maps[0]?.id || null;
+  editor.map = null;
+  editor.data = createEmptyMapData();
+  renderState();
+  setStatus('Mapa removido.');
+}
+
 function setManagerSection(section) {
   selectedSection = section;
 
@@ -283,7 +331,7 @@ function setMapTab(tab) {
     panel.classList.toggle('active', panel.dataset.mapTabPanel === tab);
   }
 
-  if (tab === 'editor') {
+  if (['editor', 'speed'].includes(tab)) {
     renderEditor();
   }
 }
@@ -396,7 +444,7 @@ function renderMaps() {
     item.type = 'button';
     item.innerHTML = `
       <strong>${escapeHtml(map.name)}</strong>
-      <span class="map-summary">${map.widthCells} x ${map.heightCells} celulas, ${map.cellSize}px por celula, personagem ${map.characterSize}px</span>
+      <span class="map-summary">${map.widthCells} x ${map.heightCells} celulas, ${map.cellSize}px por celula, velocidade ${map.movementSpeed || 5}</span>
       <small>Entrada: Col ${map.entryColumn} / Lin ${map.entryRow}</small>
       <small>Saidas: N ${map.exits.north || '-'} | L ${map.exits.east || '-'} | S ${map.exits.south || '-'} | O ${map.exits.west || '-'}</small>
     `;
@@ -436,6 +484,7 @@ function fillMapForm(map) {
   mapForm.elements.heightCells.value = map.heightCells;
   mapForm.elements.cellSize.value = map.cellSize;
   mapForm.elements.characterSize.value = map.characterSize;
+  mapForm.elements.movementSpeed.value = map.movementSpeed || 5;
   mapForm.elements.entryColumn.value = map.entryColumn;
   mapForm.elements.entryRow.value = map.entryRow;
   mapForm.elements.backgroundColor.value = map.backgroundColor;
@@ -474,6 +523,7 @@ function setDefaultMapFormValues() {
   mapForm.elements.heightCells.value ||= 1000;
   mapForm.elements.cellSize.value ||= 16;
   mapForm.elements.characterSize.value ||= 64;
+  mapForm.elements.movementSpeed.value ||= 5;
   mapForm.elements.entryColumn.value ||= 500;
   mapForm.elements.entryRow.value ||= 500;
   mapForm.elements.backgroundColor.value ||= '#15161d';
@@ -496,7 +546,7 @@ async function loadMapEditor(mapId) {
   }
 
   editor.map = data.map;
-  editor.data = normalizeClientMapData(data.data);
+  editor.data = normalizeClientMapData(data.data, editor.map);
   editor.zoom = 1;
   editor.offsetX = Math.max(0, ((editor.map.entryColumn - 12) * editor.map.cellSize));
   editor.offsetY = Math.max(0, ((editor.map.entryRow - 10) * editor.map.cellSize));
@@ -504,6 +554,9 @@ async function loadMapEditor(mapId) {
   preloadEditorBackground();
   renderTeleportFormDefaults();
   renderTeleportList();
+  renderSpeedAreaFormDefaults();
+  renderSpeedAreaList();
+  renderLevelCurveForm();
   renderEditor();
   setStatus('Editor carregado.');
 }
@@ -532,8 +585,10 @@ async function saveMapEditor() {
     return;
   }
 
-  editor.data = normalizeClientMapData(data.data);
+  editor.data = normalizeClientMapData(data.data, editor.map);
   renderTeleportList();
+  renderSpeedAreaList();
+  renderLevelCurveForm();
   renderEditor();
   setStatus('Editor salvo.');
 }
@@ -829,6 +884,127 @@ function renderTeleportList() {
   }
 }
 
+function upsertSpeedArea(values) {
+  if (!editor.map) {
+    return;
+  }
+
+  const area = {
+    id: values.id || cryptoRandomId(),
+    column: Number(values.column),
+    row: Number(values.row),
+    width: Number(values.width),
+    height: Number(values.height),
+    multiplier: Number(values.multiplier),
+  };
+
+  if (!isCellInsideMap(area.column, area.row, editor.map) || area.width < 1 || area.height < 1) {
+    setStatus('Area de velocidade fora do mapa.');
+    return;
+  }
+
+  area.width = clamp(area.width, 1, editor.map.widthCells - area.column + 1);
+  area.height = clamp(area.height, 1, editor.map.heightCells - area.row + 1);
+  area.multiplier = clamp(Number.isFinite(area.multiplier) ? area.multiplier : 1, 0.2, 3);
+
+  const index = editor.data.speedAreas.findIndex((item) => item.id === area.id);
+
+  if (index >= 0) {
+    editor.data.speedAreas[index] = area;
+  } else {
+    editor.data.speedAreas.push(area);
+  }
+
+  speedAreaForm.reset();
+  renderSpeedAreaFormDefaults();
+  renderSpeedAreaList();
+  renderEditor();
+  setStatus('Area de velocidade pronta para salvar.');
+}
+
+function removeSpeedArea(id) {
+  editor.data.speedAreas = editor.data.speedAreas.filter((area) => area.id !== id);
+  renderSpeedAreaList();
+  renderEditor();
+}
+
+function editSpeedArea(area) {
+  speedAreaForm.elements.id.value = area.id;
+  speedAreaForm.elements.column.value = area.column;
+  speedAreaForm.elements.row.value = area.row;
+  speedAreaForm.elements.width.value = area.width;
+  speedAreaForm.elements.height.value = area.height;
+  speedAreaForm.elements.multiplier.value = area.multiplier;
+}
+
+function renderSpeedAreaFormDefaults() {
+  if (!editor.map) {
+    return;
+  }
+
+  speedAreaForm.elements.column.value ||= editor.map.entryColumn;
+  speedAreaForm.elements.row.value ||= editor.map.entryRow;
+  speedAreaForm.elements.width.value ||= 5;
+  speedAreaForm.elements.height.value ||= 5;
+  speedAreaForm.elements.multiplier.value ||= 1;
+}
+
+function renderSpeedAreaList() {
+  speedAreaList.innerHTML = '';
+
+  if (!editor.data.speedAreas.length) {
+    speedAreaList.innerHTML = '<p class="status">Nenhuma area de velocidade neste mapa.</p>';
+    return;
+  }
+
+  for (const area of editor.data.speedAreas) {
+    const row = document.createElement('div');
+    row.className = 'teleport-row';
+    row.innerHTML = `
+      <strong>Col ${area.column} / Lin ${area.row}</strong>
+      <small>${area.width} x ${area.height} celulas, multiplicador ${area.multiplier}x</small>
+    `;
+
+    const actions = document.createElement('div');
+    actions.className = 'editor-actions';
+
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.textContent = 'Editar';
+    editButton.addEventListener('click', () => editSpeedArea(area));
+
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.textContent = 'Remover';
+    removeButton.addEventListener('click', () => removeSpeedArea(area.id));
+
+    actions.append(editButton, removeButton);
+    row.append(actions);
+    speedAreaList.append(row);
+  }
+}
+
+function saveLevelCurve(values) {
+  if (!editor.map) {
+    return;
+  }
+
+  editor.data.levelCurve = [1, 2, 3, 4, 5].map((level) => (
+    clamp(Number(values[`level${level}`]) || editor.map.characterSize, 16, 256)
+  ));
+  renderLevelCurveForm();
+  renderEditor();
+  setStatus('Curva de nivel pronta para salvar.');
+}
+
+function renderLevelCurveForm() {
+  const curve = normalizeLevelCurve(editor.data.levelCurve, editor.map);
+
+  curve.forEach((size, index) => {
+    levelCurveForm.elements[`level${index + 1}`].value = size;
+  });
+}
+
 function renderEditor() {
   resizeEditorCanvas();
   editorContext.fillStyle = '#0d0f14';
@@ -849,6 +1025,7 @@ function renderEditor() {
   }
 
   renderEditorCollisions();
+  renderEditorSpeedAreas();
   renderEditorTeleports();
   renderEditorEntryPoint();
   renderEditorGrid();
@@ -894,6 +1071,30 @@ function renderEditorCollisions() {
       editor.map.cellSize,
       editor.map.cellSize,
     );
+  }
+}
+
+function renderEditorSpeedAreas() {
+  for (const area of editor.data.speedAreas) {
+    if (!isRectVisible(area)) {
+      continue;
+    }
+
+    editorContext.fillStyle = area.multiplier >= 1
+      ? 'rgba(34, 197, 94, 0.28)'
+      : 'rgba(245, 158, 11, 0.32)';
+    editorContext.strokeStyle = area.multiplier >= 1
+      ? 'rgba(134, 239, 172, 0.76)'
+      : 'rgba(251, 191, 36, 0.76)';
+    editorContext.lineWidth = Math.max(2 / editor.zoom, 1);
+
+    const x = (area.column - 1) * editor.map.cellSize;
+    const y = (area.row - 1) * editor.map.cellSize;
+    const width = area.width * editor.map.cellSize;
+    const height = area.height * editor.map.cellSize;
+
+    editorContext.fillRect(x, y, width, height);
+    editorContext.strokeRect(x, y, width, height);
   }
 }
 
@@ -999,7 +1200,17 @@ function isCellVisible(column, row) {
   return column >= bounds.firstColumn && column <= bounds.lastColumn && row >= bounds.firstRow && row <= bounds.lastRow;
 }
 
-function normalizeClientMapData(data) {
+function isRectVisible(rect) {
+  const bounds = getVisibleCellBounds();
+  return (
+    rect.column <= bounds.lastColumn &&
+    rect.column + rect.width - 1 >= bounds.firstColumn &&
+    rect.row <= bounds.lastRow &&
+    rect.row + rect.height - 1 >= bounds.firstRow
+  );
+}
+
+function normalizeClientMapData(data, map = null) {
   const blockedCells = Array.isArray(data?.blockedCells) ? data.blockedCells : [];
 
   return {
@@ -1009,11 +1220,55 @@ function normalizeClientMapData(data) {
     blockedCells,
     blockedCellSet: new Set(blockedCells),
     teleportPoints: Array.isArray(data?.teleportPoints) ? data.teleportPoints : [],
+    speedAreas: Array.isArray(data?.speedAreas) ? data.speedAreas.map(normalizeSpeedArea).filter(Boolean) : [],
+    levelCurve: normalizeLevelCurve(data?.levelCurve, map),
   };
 }
 
+function normalizeSpeedArea(area) {
+  const normalized = {
+    id: String(area?.id || cryptoRandomId()),
+    column: Number(area?.column),
+    row: Number(area?.row),
+    width: Number(area?.width),
+    height: Number(area?.height),
+    multiplier: Number(area?.multiplier),
+  };
+
+  if (
+    !Number.isInteger(normalized.column) ||
+    !Number.isInteger(normalized.row) ||
+    !Number.isInteger(normalized.width) ||
+    !Number.isInteger(normalized.height) ||
+    normalized.width < 1 ||
+    normalized.height < 1
+  ) {
+    return null;
+  }
+
+  normalized.multiplier = clamp(Number.isFinite(normalized.multiplier) ? normalized.multiplier : 1, 0.2, 3);
+  return normalized;
+}
+
+function normalizeLevelCurve(value, map) {
+  const baseSize = Number(map?.characterSize || 64);
+  const fallback = [
+    Math.max(16, Math.round(baseSize * 0.8)),
+    Math.max(16, Math.round(baseSize * 0.9)),
+    Math.max(16, Math.round(baseSize)),
+    Math.max(16, Math.round(baseSize * 1.1)),
+    Math.max(16, Math.round(baseSize * 1.2)),
+  ];
+  const source = Array.isArray(value) ? value : [];
+
+  return fallback.map((defaultSize, index) => {
+    const size = Number(source[index]);
+    return Number.isInteger(size) && size >= 16 && size <= 256 ? size : defaultSize;
+  });
+}
+
 function createEmptyMapData() {
-  return normalizeClientMapData({});
+  return normalizeClientMapData({}, null);
 }
 
 function syncBlockedCellsArray() {

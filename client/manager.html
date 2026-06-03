@@ -508,6 +508,13 @@
         overflow: auto;
       }
 
+      .rule-list {
+        display: grid;
+        gap: 8px;
+        max-height: 320px;
+        overflow: auto;
+      }
+
       .teleport-row {
         display: grid;
         gap: 7px;
@@ -650,7 +657,10 @@
                   <h2>Mapas</h2>
                   <p>Selecione um mapa para editar configuracoes, imagem, colisoes e teleportes.</p>
                 </div>
-                <button class="primary" type="submit" form="map-form">Salvar mapa</button>
+                <div class="editor-actions">
+                  <button type="button" data-delete-map>Remover</button>
+                  <button class="primary" type="submit" form="map-form">Salvar mapa</button>
+                </div>
               </div>
 
               <div class="maps-layout">
@@ -670,6 +680,8 @@
                     <button class="tab-button" type="button" data-map-tab="visual">Visual</button>
                     <button class="tab-button" type="button" data-map-tab="editor">Editor</button>
                     <button class="tab-button" type="button" data-map-tab="teleports">Teleportes</button>
+                    <button class="tab-button" type="button" data-map-tab="speed">Velocidade</button>
+                    <button class="tab-button" type="button" data-map-tab="levels">Niveis</button>
                   </div>
 
                   <div class="tab-panel active" data-map-tab-panel="settings">
@@ -695,6 +707,10 @@
                         <label>
                           Personagem na celula
                           <input name="characterSize" type="number" min="16" max="256" required />
+                        </label>
+                        <label>
+                          Velocidade padrao
+                          <input name="movementSpeed" type="number" min="1" max="20" step="0.25" required />
                         </label>
                         <label>
                           Coluna de entrada
@@ -794,6 +810,70 @@
                       </aside>
                       <div class="teleport-list" data-teleport-list></div>
                     </div>
+                  </div>
+
+                  <div class="tab-panel" data-map-tab-panel="speed">
+                    <div class="editor-shell">
+                      <aside class="editor-side">
+                        <form class="compact-form" data-speed-area-form>
+                          <input name="id" type="hidden" />
+                          <div class="grid-two">
+                            <label>
+                              Coluna
+                              <input name="column" type="number" min="1" required />
+                            </label>
+                            <label>
+                              Linha
+                              <input name="row" type="number" min="1" required />
+                            </label>
+                          </div>
+                          <div class="grid-two">
+                            <label>
+                              Largura
+                              <input name="width" type="number" min="1" required />
+                            </label>
+                            <label>
+                              Altura
+                              <input name="height" type="number" min="1" required />
+                            </label>
+                          </div>
+                          <label>
+                            Multiplicador
+                            <input name="multiplier" type="number" min="0.2" max="3" step="0.05" required />
+                          </label>
+                          <button class="primary" type="submit">Salvar area</button>
+                        </form>
+                      </aside>
+                      <div class="rule-list" data-speed-area-list></div>
+                    </div>
+                  </div>
+
+                  <div class="tab-panel" data-map-tab-panel="levels">
+                    <form class="form-grid" data-level-curve-form>
+                      <div class="grid-three">
+                        <label>
+                          Nivel 1
+                          <input name="level1" type="number" min="16" max="256" required />
+                        </label>
+                        <label>
+                          Nivel 2
+                          <input name="level2" type="number" min="16" max="256" required />
+                        </label>
+                        <label>
+                          Nivel 3
+                          <input name="level3" type="number" min="16" max="256" required />
+                        </label>
+                        <label>
+                          Nivel 4
+                          <input name="level4" type="number" min="16" max="256" required />
+                        </label>
+                        <label>
+                          Nivel 5
+                          <input name="level5" type="number" min="16" max="256" required />
+                        </label>
+                      </div>
+                      <button class="primary" type="submit">Salvar curva</button>
+                    </form>
                   </div>
                 </section>
               </div>
