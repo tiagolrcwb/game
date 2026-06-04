@@ -32,6 +32,14 @@ const newMapButton = document.querySelector('[data-new-map]');
 const deleteMapButton = document.querySelector('[data-delete-map]');
 const mapTabButtons = document.querySelectorAll('[data-map-tab]');
 const mapTabPanels = document.querySelectorAll('[data-map-tab-panel]');
+const terrainForm = document.querySelector('[data-terrain-form]');
+const terrainSeedInput = document.querySelector('[data-terrain-seed]');
+const terrainRandomizeButton = document.querySelector('[data-terrain-randomize]');
+const terrainPreviewButton = document.querySelector('[data-terrain-preview-action]');
+const terrainApplyButton = document.querySelector('[data-terrain-apply]');
+const terrainPreviewCanvas = document.querySelector('[data-terrain-preview]');
+const terrainPreviewContext = terrainPreviewCanvas.getContext('2d');
+const terrainSummary = document.querySelector('[data-terrain-summary]');
 
 const SPEED_LEVEL_MULTIPLIERS = {
   1: 0.5,
@@ -39,6 +47,74 @@ const SPEED_LEVEL_MULTIPLIERS = {
   3: 1,
   4: 1.25,
   5: 1.5,
+};
+const TERRAIN_BIOMES = {
+  forest: {
+    label: 'Floresta',
+    base: ['#24351e', '#304724', '#3d552b', '#65733e'],
+    water: '#263f4a',
+    path: '#766447',
+    blocked: '#172414',
+    slow: '#2d4b2d',
+    accent: '#536d32',
+    obstacleBias: 0.54,
+    waterBias: 0.28,
+  },
+  swamp: {
+    label: 'Pantano',
+    base: ['#1f3328', '#263f32', '#314a36', '#485434'],
+    water: '#1c3e43',
+    path: '#5b5137',
+    blocked: '#18261f',
+    slow: '#294c39',
+    accent: '#5d6840',
+    obstacleBias: 0.5,
+    waterBias: 0.42,
+  },
+  desert: {
+    label: 'Deserto',
+    base: ['#7a6438', '#927746', '#ad8f58', '#c5a46c'],
+    water: '#45666d',
+    path: '#d1b47a',
+    blocked: '#5b4730',
+    slow: '#b18b4e',
+    accent: '#8f6a3d',
+    obstacleBias: 0.62,
+    waterBias: 0.14,
+  },
+  mountain: {
+    label: 'Montanha',
+    base: ['#30323a', '#41444c', '#555861', '#696a64'],
+    water: '#2d4c5b',
+    path: '#6f6556',
+    blocked: '#24262d',
+    slow: '#494d55',
+    accent: '#7b7d78',
+    obstacleBias: 0.44,
+    waterBias: 0.16,
+  },
+  ruins: {
+    label: 'Ruinas',
+    base: ['#2a2a2d', '#3a3835', '#504b43', '#676052'],
+    water: '#263f4a',
+    path: '#746a5c',
+    blocked: '#1f1f22',
+    slow: '#4d4639',
+    accent: '#8a7d64',
+    obstacleBias: 0.48,
+    waterBias: 0.12,
+  },
+  islands: {
+    label: 'Ilhas',
+    base: ['#436c3f', '#5b7c44', '#8a7b45', '#b59b62'],
+    water: '#23516b',
+    path: '#c0a66b',
+    blocked: '#24412d',
+    slow: '#3d6b4d',
+    accent: '#749858',
+    obstacleBias: 0.58,
+    waterBias: 0.55,
+  },
 };
 
 let managerToken = localStorage.getItem('managerToken') || '';
@@ -63,6 +139,7 @@ let editor = {
   brushAddsCollision: true,
   paintedCells: new Set(),
   backgroundImage: null,
+  terrainDraft: null,
 };
 
 if (managerToken) {
@@ -162,6 +239,9 @@ editorSaveButton.addEventListener('click', saveMapEditor);
 editorZoomInButton.addEventListener('click', () => setEditorZoom(editor.zoom * 1.25));
 editorZoomOutButton.addEventListener('click', () => setEditorZoom(editor.zoom / 1.25));
 editorBackgroundInput.addEventListener('change', uploadMapBackground);
+terrainRandomizeButton.addEventListener('click', randomizeTerrainSeed);
+terrainPreviewButton.addEventListener('click', previewTerrain);
+terrainApplyButton.addEventListener('click', applyTerrainDraft);
 mapForm.elements.widthCells.addEventListener('change', clampMapEntryFields);
 mapForm.elements.heightCells.addEventListener('change', clampMapEntryFields);
 
@@ -637,6 +717,7 @@ async function loadMapEditor(mapId) {
   editor.offsetX = Math.max(0, ((editor.map.entryColumn - 12) * editor.map.cellSize));
   editor.offsetY = Math.max(0, ((editor.map.entryRow - 10) * editor.map.cellSize));
   editor.backgroundImage = null;
+  editor.terrainDraft = null;
   preloadEditorBackground();
   renderTeleportFormDefaults();
   renderTeleportList();
@@ -720,6 +801,489 @@ async function uploadMapBackground() {
   renderState();
   renderBackgroundPreview();
   setStatus('Imagem enviada.');
+}
+
+async function randomizeTerrainSeed() {
+  const map = getSelectedMap();
+  const prefix = map?.name ? map.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : 'mapa';
+  terrainSeedInput.value = `${prefix}-${Date.now().toString(36).slice(-6)}`;
+  await previewTerrain();
+}
+
+async function previewTerrain() {
+  const map = getSelectedMap();
+
+  if (!map) {
+    setStatus('Selecione um mapa para gerar terreno.');
+    return;
+  }
+
+  if (map.widthCells * map.heightCells > 1200000) {
+    setStatus('Mapa muito grande para gerar terreno de uma vez. Use ate 1.200.000 celulas por geracao.');
+    return;
+  }
+
+  if (!editor.map || editor.map.id !== map.id) {
+    await loadMapEditor(map.id);
+  }
+
+  setStatus('Gerando terreno...');
+  editor.terrainDraft = generateTerrainDraft(map, getTerrainOptions(map));
+  drawTerrainPreview(editor.terrainDraft);
+  setStatus('Previa de terreno gerada.');
+}
+
+async function applyTerrainDraft() {
+  const map = getSelectedMap();
+
+  if (!map) {
+    setStatus('Selecione um mapa para aplicar terreno.');
+    return;
+  }
+
+  if (!editor.terrainDraft || editor.terrainDraft.mapId !== map.id) {
+    await previewTerrain();
+  }
+
+  if (!editor.terrainDraft) {
+    return;
+  }
+
+  setStatus('Aplicando terreno...');
+  const dataUrl = editor.terrainDraft.canvas.toDataURL('image/jpeg', 0.88);
+  const backgroundState = await uploadGeneratedMapBackground(map.id, dataUrl);
+
+  if (!backgroundState) {
+    return;
+  }
+
+  state = backgroundState;
+  selectedMapId = map.id;
+  const updatedMap = state.maps.find((item) => item.id === map.id) || map;
+  editor.map = updatedMap;
+  editor.data = normalizeClientMapData(editor.terrainDraft.data, updatedMap);
+  editor.backgroundImage = createImageFromSource(dataUrl, renderEditor);
+
+  const saved = await saveGeneratedMapData(updatedMap.id, editor.data);
+
+  if (!saved) {
+    return;
+  }
+
+  editor.data = normalizeClientMapData(saved.data, updatedMap);
+  renderState();
+  renderEditor();
+  renderBackgroundPreview();
+  setStatus('Terreno aplicado ao mapa.');
+}
+
+function getTerrainOptions(map) {
+  const values = formToObject(terrainForm);
+  const seed = String(values.seed || '').trim() || `${map.name}-${map.id}`;
+
+  terrainSeedInput.value = seed;
+
+  return {
+    biome: TERRAIN_BIOMES[values.biome] ? values.biome : 'forest',
+    seed,
+    obstacles: Number(values.obstacles || 0) / 100,
+    paths: Number(values.paths || 0) / 100,
+    water: Number(values.water || 0) / 100,
+    height: Number(values.height || 0) / 100,
+  };
+}
+
+async function uploadGeneratedMapBackground(mapId, dataUrl) {
+  const response = await fetch('/api/manager/map-background', {
+    method: 'POST',
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ mapId, dataUrl }),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    setStatus(data.error || 'Nao foi possivel enviar o background gerado.');
+    return null;
+  }
+
+  return data;
+}
+
+async function saveGeneratedMapData(mapId, terrainData) {
+  const response = await fetch('/api/manager/map-editor', {
+    method: 'PUT',
+    headers: {
+      ...getAuthHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      mapId,
+      data: terrainData,
+    }),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    setStatus(data.error || 'Nao foi possivel salvar as regras do terreno.');
+    return null;
+  }
+
+  return data;
+}
+
+function generateTerrainDraft(map, options) {
+  const biome = TERRAIN_BIOMES[options.biome] || TERRAIN_BIOMES.forest;
+  const seed = hashString(`${options.seed}:${map.id}:${options.biome}`);
+  const canvas = document.createElement('canvas');
+  const dimensions = getTerrainCanvasDimensions(map);
+  canvas.width = dimensions.width;
+  canvas.height = dimensions.height;
+  const context = canvas.getContext('2d');
+  const pathCells = generateTerrainPaths(map, seed, options);
+  const data = {
+    version: 1,
+    widthCells: map.widthCells,
+    heightCells: map.heightCells,
+    blockedCells: [],
+    teleportPoints: editor.data?.teleportPoints || [],
+    speedCells: [],
+    levelCells: [],
+  };
+  const blocked = new Set();
+  const speedByCell = new Map();
+  const levelByCell = new Map();
+  const entryColumn = clamp(Number(map.entryColumn || 1), 1, map.widthCells);
+  const entryRow = clamp(Number(map.entryRow || 1), 1, map.heightCells);
+
+  for (let row = 1; row <= map.heightCells; row += 1) {
+    for (let column = 1; column <= map.widthCells; column += 1) {
+      const key = getCellKey(column, row);
+      const clearRadius = Math.abs(column - entryColumn) + Math.abs(row - entryRow);
+      const pathInfluence = pathCells.has(key) ? 1 : getNeighborPathInfluence(pathCells, column, row);
+      const moisture = terrainNoise(column, row, seed, 9);
+      const detail = terrainNoise(column + 137, row - 71, seed, 4);
+      const elevation = terrainNoise(column - 311, row + 197, seed, 13);
+      const variation = terrainNoise(column + 19, row + 41, seed, 2);
+      const waterThreshold = biome.waterBias + options.water * 0.34 - pathInfluence * 0.25;
+      const obstacleThreshold = biome.obstacleBias + (1 - options.obstacles) * 0.26 + pathInfluence * 0.35;
+      const isWater = moisture < waterThreshold && clearRadius > 5;
+      const isBlocked = !isWater && detail > obstacleThreshold && clearRadius > 4;
+      const speedLevel = isWater ? 1 : (pathInfluence > 0.65 ? 4 : (moisture < waterThreshold + 0.08 ? 2 : null));
+      const heightLevel = getTerrainHeightLevel(elevation, options.height);
+
+      if (isBlocked) {
+        blocked.add(key);
+      }
+
+      if (speedLevel) {
+        speedByCell.set(key, {
+          id: cryptoRandomId(),
+          column,
+          row,
+          level: speedLevel,
+          multiplier: SPEED_LEVEL_MULTIPLIERS[speedLevel],
+        });
+      }
+
+      if (heightLevel !== 3 && variation > 0.2 + (1 - options.height) * 0.5) {
+        levelByCell.set(key, {
+          id: cryptoRandomId(),
+          column,
+          row,
+          level: heightLevel,
+        });
+      }
+    }
+  }
+
+  clearTerrainAroundEntry(blocked, speedByCell, levelByCell, map);
+  data.blockedCells = [...blocked].sort(compareCellKeys);
+  data.speedCells = [...speedByCell.values()].sort(compareCells);
+  data.levelCells = [...levelByCell.values()].sort(compareCells);
+  paintTerrainBackground(context, canvas, map, options, biome, seed, pathCells);
+
+  return {
+    mapId: map.id,
+    canvas,
+    data,
+    summary: {
+      biome: biome.label,
+      blocked: data.blockedCells.length,
+      speed: data.speedCells.length,
+      level: data.levelCells.length,
+      size: `${canvas.width}x${canvas.height}`,
+    },
+  };
+}
+
+function getTerrainCanvasDimensions(map) {
+  const mapWidth = Math.max(1, map.widthCells);
+  const mapHeight = Math.max(1, map.heightCells);
+  const maxSize = 1600;
+
+  if (mapWidth >= mapHeight) {
+    return {
+      width: maxSize,
+      height: Math.max(480, Math.round(maxSize * (mapHeight / mapWidth))),
+    };
+  }
+
+  return {
+    width: Math.max(480, Math.round(maxSize * (mapWidth / mapHeight))),
+    height: maxSize,
+  };
+}
+
+function generateTerrainPaths(map, seed, options) {
+  const paths = new Set();
+  const entry = {
+    column: clamp(Number(map.entryColumn || Math.ceil(map.widthCells / 2)), 1, map.widthCells),
+    row: clamp(Number(map.entryRow || Math.ceil(map.heightCells / 2)), 1, map.heightCells),
+  };
+  const endpoints = [
+    { column: 1, row: entry.row },
+    { column: map.widthCells, row: entry.row },
+    { column: entry.column, row: 1 },
+    { column: entry.column, row: map.heightCells },
+  ];
+  const count = clamp(Math.round(1 + options.paths * 3), 1, endpoints.length);
+
+  for (let index = 0; index < count; index += 1) {
+    const endpoint = endpoints[(index + seed) % endpoints.length];
+    carveTerrainPath(paths, map, entry, endpoint, seed + index * 977, options.paths);
+  }
+
+  return paths;
+}
+
+function carveTerrainPath(paths, map, start, end, seed, widthFactor) {
+  let column = start.column;
+  let row = start.row;
+  const width = clamp(Math.round(1 + widthFactor * 4), 1, 5);
+  const limit = map.widthCells + map.heightCells + 200;
+
+  for (let step = 0; step < limit && (column !== end.column || row !== end.row); step += 1) {
+    addPathBrush(paths, map, column, row, width);
+    const horizontal = Math.abs(end.column - column);
+    const vertical = Math.abs(end.row - row);
+    const wobble = terrainNoise(column + step, row - step, seed, 3) - 0.5;
+
+    if ((horizontal > vertical && wobble > -0.24) || wobble > 0.36) {
+      column += Math.sign(end.column - column);
+    } else {
+      row += Math.sign(end.row - row);
+    }
+
+    column = clamp(column, 1, map.widthCells);
+    row = clamp(row, 1, map.heightCells);
+  }
+
+  addPathBrush(paths, map, end.column, end.row, width);
+}
+
+function addPathBrush(paths, map, column, row, radius) {
+  for (let offsetRow = -radius; offsetRow <= radius; offsetRow += 1) {
+    for (let offsetColumn = -radius; offsetColumn <= radius; offsetColumn += 1) {
+      if (Math.hypot(offsetColumn, offsetRow) > radius + 0.3) {
+        continue;
+      }
+
+      const nextColumn = column + offsetColumn;
+      const nextRow = row + offsetRow;
+
+      if (isCellInsideMap(nextColumn, nextRow, map)) {
+        paths.add(getCellKey(nextColumn, nextRow));
+      }
+    }
+  }
+}
+
+function getNeighborPathInfluence(pathCells, column, row) {
+  let influence = 0;
+
+  for (let radius = 1; radius <= 3; radius += 1) {
+    if (
+      pathCells.has(getCellKey(column + radius, row)) ||
+      pathCells.has(getCellKey(column - radius, row)) ||
+      pathCells.has(getCellKey(column, row + radius)) ||
+      pathCells.has(getCellKey(column, row - radius))
+    ) {
+      influence = Math.max(influence, 1 - radius * 0.22);
+    }
+  }
+
+  return influence;
+}
+
+function getTerrainHeightLevel(elevation, heightAmount) {
+  if (heightAmount < 0.08) return 3;
+  if (elevation < 0.16 + (1 - heightAmount) * 0.18) return 1;
+  if (elevation < 0.32 + (1 - heightAmount) * 0.12) return 2;
+  if (elevation > 0.84 - (1 - heightAmount) * 0.18) return 5;
+  if (elevation > 0.68 - (1 - heightAmount) * 0.12) return 4;
+  return 3;
+}
+
+function clearTerrainAroundEntry(blocked, speedByCell, levelByCell, map) {
+  const entryColumn = clamp(Number(map.entryColumn || 1), 1, map.widthCells);
+  const entryRow = clamp(Number(map.entryRow || 1), 1, map.heightCells);
+
+  for (let row = entryRow - 4; row <= entryRow + 4; row += 1) {
+    for (let column = entryColumn - 4; column <= entryColumn + 4; column += 1) {
+      if (!isCellInsideMap(column, row, map)) {
+        continue;
+      }
+
+      const key = getCellKey(column, row);
+      blocked.delete(key);
+      speedByCell.delete(key);
+      levelByCell.delete(key);
+    }
+  }
+}
+
+function paintTerrainBackground(context, canvas, map, options, biome, seed, pathCells) {
+  const cellWidth = canvas.width / map.widthCells;
+  const cellHeight = canvas.height / map.heightCells;
+
+  context.fillStyle = biome.base[0];
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let row = 1; row <= map.heightCells; row += 1) {
+    for (let column = 1; column <= map.widthCells; column += 1) {
+      const moisture = terrainNoise(column, row, seed, 9);
+      const detail = terrainNoise(column + 137, row - 71, seed, 4);
+      const elevation = terrainNoise(column - 311, row + 197, seed, 13);
+      const pathInfluence = pathCells.has(getCellKey(column, row)) ? 1 : getNeighborPathInfluence(pathCells, column, row);
+      const waterThreshold = biome.waterBias + options.water * 0.34 - pathInfluence * 0.25;
+      const baseIndex = clamp(Math.floor((moisture * 0.55 + elevation * 0.45) * biome.base.length), 0, biome.base.length - 1);
+      let color = biome.base[baseIndex];
+
+      if (moisture < waterThreshold) {
+        color = biome.water;
+      } else if (pathInfluence > 0.45) {
+        color = mixHexColors(biome.path, color, 0.18 + pathInfluence * 0.3);
+      } else if (detail > biome.obstacleBias + (1 - options.obstacles) * 0.24) {
+        color = mixHexColors(biome.blocked, color, 0.35);
+      } else if (elevation > 0.72) {
+        color = mixHexColors(biome.accent, color, 0.22);
+      }
+
+      context.fillStyle = color;
+      context.fillRect(
+        Math.floor((column - 1) * cellWidth),
+        Math.floor((row - 1) * cellHeight),
+        Math.ceil(cellWidth) + 1,
+        Math.ceil(cellHeight) + 1,
+      );
+    }
+  }
+
+  addTerrainTexture(context, canvas, seed, biome);
+}
+
+function addTerrainTexture(context, canvas, seed, biome) {
+  context.globalAlpha = 0.16;
+
+  for (let index = 0; index < 2600; index += 1) {
+    const x = seededFloat(seed + index * 17) * canvas.width;
+    const y = seededFloat(seed + index * 31) * canvas.height;
+    const size = 1 + seededFloat(seed + index * 47) * 5;
+    context.fillStyle = seededFloat(seed + index * 61) > 0.5 ? biome.accent : '#0b0b0d';
+    context.fillRect(x, y, size, size);
+  }
+
+  context.globalAlpha = 1;
+}
+
+function drawTerrainPreview(draft) {
+  terrainPreviewCanvas.width = draft.canvas.width;
+  terrainPreviewCanvas.height = draft.canvas.height;
+  terrainPreviewContext.clearRect(0, 0, terrainPreviewCanvas.width, terrainPreviewCanvas.height);
+  terrainPreviewContext.drawImage(draft.canvas, 0, 0);
+  terrainSummary.textContent = `${draft.summary.biome} | ${draft.summary.size} | ${draft.summary.blocked} bloqueios | ${draft.summary.speed} velocidades | ${draft.summary.level} niveis`;
+}
+
+function createImageFromSource(source, onload = null) {
+  const image = new Image();
+  if (onload) {
+    image.onload = onload;
+  }
+  image.src = source;
+  return image;
+}
+
+function terrainNoise(column, row, seed, scale) {
+  const x = Math.floor(column / scale);
+  const y = Math.floor(row / scale);
+  const fx = (column / scale) - x;
+  const fy = (row / scale) - y;
+  const top = lerp(seededCellFloat(x, y, seed), seededCellFloat(x + 1, y, seed), smoothStep(fx));
+  const bottom = lerp(seededCellFloat(x, y + 1, seed), seededCellFloat(x + 1, y + 1, seed), smoothStep(fx));
+
+  return lerp(top, bottom, smoothStep(fy));
+}
+
+function seededCellFloat(x, y, seed) {
+  return seededFloat((x * 374761393) ^ (y * 668265263) ^ seed);
+}
+
+function seededFloat(seed) {
+  let value = seed | 0;
+  value ^= value << 13;
+  value ^= value >>> 17;
+  value ^= value << 5;
+  return ((value >>> 0) % 100000) / 100000;
+}
+
+function hashString(value) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function smoothStep(value) {
+  return value * value * (3 - 2 * value);
+}
+
+function lerp(start, end, amount) {
+  return start + (end - start) * amount;
+}
+
+function mixHexColors(first, second, amount) {
+  const a = hexToRgb(first);
+  const b = hexToRgb(second);
+
+  return rgbToHex({
+    r: Math.round(lerp(a.r, b.r, amount)),
+    g: Math.round(lerp(a.g, b.g, amount)),
+    b: Math.round(lerp(a.b, b.b, amount)),
+  });
+}
+
+function hexToRgb(color) {
+  const normalized = color.replace('#', '');
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex(color) {
+  return `#${[color.r, color.g, color.b].map((part) => part.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function compareCells(a, b) {
+  return a.row - b.row || a.column - b.column;
 }
 
 function setEditorMode(mode) {

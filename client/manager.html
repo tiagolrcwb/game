@@ -419,6 +419,33 @@
         display: block;
       }
 
+      .terrain-builder {
+        display: grid;
+        grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+
+      .terrain-preview {
+        display: grid;
+        gap: 10px;
+      }
+
+      .terrain-preview canvas {
+        width: 100%;
+        min-height: 360px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: #0b0b0d;
+        display: block;
+      }
+
+      .terrain-summary {
+        min-height: 20px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
       .migration-row {
         display: grid;
         grid-template-columns: 1fr auto auto;
@@ -535,7 +562,8 @@
       @media (max-width: 1040px) {
         .app-shell,
         .maps-layout,
-        .editor-shell {
+        .editor-shell,
+        .terrain-builder {
           grid-template-columns: 1fr;
         }
 
@@ -678,6 +706,7 @@
                   <div class="tabs" role="tablist" aria-label="Informacoes do mapa">
                     <button class="tab-button active" type="button" data-map-tab="settings">Configuracoes</button>
                     <button class="tab-button" type="button" data-map-tab="visual">Visual</button>
+                    <button class="tab-button" type="button" data-map-tab="terrain">Terreno</button>
                     <button class="tab-button" type="button" data-map-tab="editor">Editor</button>
                     <button class="tab-button" type="button" data-map-tab="teleports">Teleportes</button>
                   </div>
@@ -763,6 +792,55 @@
                         <input type="file" accept="image/png,image/jpeg,image/webp" data-editor-background />
                       </label>
                       <div class="background-preview" data-background-preview>Nenhuma imagem vinculada.</div>
+                    </div>
+                  </div>
+
+                  <div class="tab-panel" data-map-tab-panel="terrain">
+                    <div class="terrain-builder">
+                      <form class="compact-form" data-terrain-form>
+                        <div class="grid-two">
+                          <label>
+                            Bioma
+                            <select name="biome">
+                              <option value="forest">Floresta</option>
+                              <option value="swamp">Pantano</option>
+                              <option value="desert">Deserto</option>
+                              <option value="mountain">Montanha</option>
+                              <option value="ruins">Ruinas</option>
+                              <option value="islands">Ilhas</option>
+                            </select>
+                          </label>
+                          <label>
+                            Seed
+                            <input name="seed" data-terrain-seed maxlength="80" placeholder="mapa-entrada-001" />
+                          </label>
+                        </div>
+                        <label>
+                          Obstaculos
+                          <input name="obstacles" type="range" min="0" max="100" value="36" />
+                        </label>
+                        <label>
+                          Caminhos
+                          <input name="paths" type="range" min="0" max="100" value="48" />
+                        </label>
+                        <label>
+                          Agua / terreno lento
+                          <input name="water" type="range" min="0" max="100" value="22" />
+                        </label>
+                        <label>
+                          Relevo
+                          <input name="height" type="range" min="0" max="100" value="35" />
+                        </label>
+                        <div class="editor-actions">
+                          <button type="button" data-terrain-randomize>Seed</button>
+                          <button type="button" data-terrain-preview-action>Prever</button>
+                          <button class="primary" type="button" data-terrain-apply>Aplicar</button>
+                        </div>
+                      </form>
+                      <div class="terrain-preview">
+                        <canvas data-terrain-preview width="960" height="540"></canvas>
+                        <p class="terrain-summary" data-terrain-summary>Gere uma previa para este mapa.</p>
+                      </div>
                     </div>
                   </div>
 
@@ -953,6 +1031,6 @@
       </div>
     </section>
 
-    <script src="manager.js?v=2026-06-03-mobile-zoom-bg-1"></script>
+    <script src="manager.js?v=2026-06-04-terrain-generator-1"></script>
   </body>
 </html>
