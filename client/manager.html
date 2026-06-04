@@ -811,26 +811,37 @@
                             </select>
                           </label>
                           <label>
-                            Seed
-                            <input name="seed" data-terrain-seed maxlength="80" placeholder="mapa-entrada-001" />
+                            Perspectiva
+                            <select name="perspective">
+                              <option value="tilted70">Top down 70 graus</option>
+                              <option value="flat">Top down plano</option>
+                            </select>
                           </label>
                         </div>
                         <label>
-                          Obstaculos
-                          <input name="obstacles" type="range" min="0" max="100" value="36" />
+                          Seed
+                          <input name="seed" data-terrain-seed maxlength="80" placeholder="mapa-entrada-001" />
                         </label>
-                        <label>
-                          Caminhos
-                          <input name="paths" type="range" min="0" max="100" value="48" />
-                        </label>
-                        <label>
-                          Agua / terreno lento
-                          <input name="water" type="range" min="0" max="100" value="22" />
-                        </label>
-                        <label>
-                          Relevo
-                          <input name="height" type="range" min="0" max="100" value="35" />
-                        </label>
+                        <div class="grid-two">
+                          <label>
+                            Obstaculos
+                            <input name="obstacles" type="range" min="0" max="100" value="36" />
+                          </label>
+                          <label>
+                            Caminhos
+                            <input name="paths" type="range" min="0" max="100" value="48" />
+                          </label>
+                        </div>
+                        <div class="grid-two">
+                          <label>
+                            Agua / lento
+                            <input name="water" type="range" min="0" max="100" value="22" />
+                          </label>
+                          <label>
+                            Relevo
+                            <input name="height" type="range" min="0" max="100" value="35" />
+                          </label>
+                        </div>
                         <div class="editor-actions">
                           <button type="button" data-terrain-randomize>Seed</button>
                           <button type="button" data-terrain-preview-action>Prever</button>
@@ -1031,6 +1042,6 @@
       </div>
     </section>
 
-    <script src="manager.js?v=2026-06-04-terrain-generator-1"></script>
+    <script src="manager.js?v=2026-06-04-terrain-generator-2"></script>
   </body>
 </html>

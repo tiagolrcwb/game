@@ -885,6 +885,7 @@ function getTerrainOptions(map) {
 
   return {
     biome: TERRAIN_BIOMES[values.biome] ? values.biome : 'forest',
+    perspective: values.perspective === 'flat' ? 'flat' : 'tilted70',
     seed,
     obstacles: Number(values.obstacles || 0) / 100,
     paths: Number(values.paths || 0) / 100,
@@ -1003,7 +1004,11 @@ function generateTerrainDraft(map, options) {
   data.blockedCells = [...blocked].sort(compareCellKeys);
   data.speedCells = [...speedByCell.values()].sort(compareCells);
   data.levelCells = [...levelByCell.values()].sort(compareCells);
-  paintTerrainBackground(context, canvas, map, options, biome, seed, pathCells);
+  paintTerrainBackground(context, canvas, map, options, biome, seed, pathCells, {
+    blocked,
+    speedByCell,
+    levelByCell,
+  });
 
   return {
     mapId: map.id,
@@ -1145,19 +1150,28 @@ function clearTerrainAroundEntry(blocked, speedByCell, levelByCell, map) {
   }
 }
 
-function paintTerrainBackground(context, canvas, map, options, biome, seed, pathCells) {
+function paintTerrainBackground(context, canvas, map, options, biome, seed, pathCells, terrainLayers) {
   const cellWidth = canvas.width / map.widthCells;
   const cellHeight = canvas.height / map.heightCells;
+  const image = context.createImageData(canvas.width, canvas.height);
+  const pixels = image.data;
+  const tilted = options.perspective === 'tilted70';
+  const lightStrength = tilted ? 0.34 : 0.14;
 
   context.fillStyle = biome.base[0];
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  for (let row = 1; row <= map.heightCells; row += 1) {
-    for (let column = 1; column <= map.widthCells; column += 1) {
-      const moisture = terrainNoise(column, row, seed, 9);
-      const detail = terrainNoise(column + 137, row - 71, seed, 4);
-      const elevation = terrainNoise(column - 311, row + 197, seed, 13);
-      const pathInfluence = pathCells.has(getCellKey(column, row)) ? 1 : getNeighborPathInfluence(pathCells, column, row);
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const column = (x / cellWidth) + 1;
+      const row = (y / cellHeight) + 1;
+      const perspectiveRow = tilted ? 1 + ((row - 1) * 0.72) + map.heightCells * 0.14 : row;
+      const moisture = terrainNoise(column, perspectiveRow, seed, 11);
+      const detail = terrainNoise(column + 137, perspectiveRow - 71, seed, 5);
+      const elevation = terrainNoise(column - 311, perspectiveRow + 197, seed, 17);
+      const eastElevation = terrainNoise(column - 310, perspectiveRow + 197, seed, 17);
+      const southElevation = terrainNoise(column - 311, perspectiveRow + 198, seed, 17);
+      const pathInfluence = getSmoothPathInfluence(pathCells, column, row);
       const waterThreshold = biome.waterBias + options.water * 0.34 - pathInfluence * 0.25;
       const baseIndex = clamp(Math.floor((moisture * 0.55 + elevation * 0.45) * biome.base.length), 0, biome.base.length - 1);
       let color = biome.base[baseIndex];
@@ -1172,17 +1186,88 @@ function paintTerrainBackground(context, canvas, map, options, biome, seed, path
         color = mixHexColors(biome.accent, color, 0.22);
       }
 
-      context.fillStyle = color;
-      context.fillRect(
-        Math.floor((column - 1) * cellWidth),
-        Math.floor((row - 1) * cellHeight),
-        Math.ceil(cellWidth) + 1,
-        Math.ceil(cellHeight) + 1,
-      );
+      const slopeLight = ((elevation - eastElevation) * 0.7) + ((southElevation - elevation) * 0.9);
+      const distanceFade = tilted ? 0.92 + (y / canvas.height) * 0.12 : 1;
+      const shade = clamp(1 + slopeLight * lightStrength + (elevation - 0.5) * lightStrength * 0.38, 0.62, 1.28) * distanceFade;
+      const rgb = scaleRgb(hexToRgb(color), shade);
+      const index = (y * canvas.width + x) * 4;
+      pixels[index] = rgb.r;
+      pixels[index + 1] = rgb.g;
+      pixels[index + 2] = rgb.b;
+      pixels[index + 3] = 255;
     }
   }
 
+  context.putImageData(image, 0, 0);
+  drawTerrainDepth(context, canvas, map, biome, terrainLayers, seed, tilted);
   addTerrainTexture(context, canvas, seed, biome);
+}
+
+function getSmoothPathInfluence(pathCells, column, row) {
+  const centerColumn = Math.floor(column);
+  const centerRow = Math.floor(row);
+  let influence = 0;
+
+  for (let offsetRow = -4; offsetRow <= 4; offsetRow += 1) {
+    for (let offsetColumn = -4; offsetColumn <= 4; offsetColumn += 1) {
+      const pathColumn = centerColumn + offsetColumn;
+      const pathRow = centerRow + offsetRow;
+
+      if (!pathCells.has(getCellKey(pathColumn, pathRow))) {
+        continue;
+      }
+
+      const distance = Math.hypot(column - (pathColumn + 0.5), row - (pathRow + 0.5));
+      influence = Math.max(influence, clamp(1 - distance / 4.6, 0, 1));
+    }
+  }
+
+  return influence;
+}
+
+function drawTerrainDepth(context, canvas, map, biome, terrainLayers, seed, tilted) {
+  const cellWidth = canvas.width / map.widthCells;
+  const cellHeight = canvas.height / map.heightCells;
+  const shadowOffset = tilted ? Math.max(2, cellHeight * 0.42) : Math.max(1, cellHeight * 0.16);
+  const blockedCells = [...terrainLayers.blocked].slice(0, 2600);
+  const highCells = [...terrainLayers.levelByCell.values()].filter((cell) => cell.level >= 4).slice(0, 1800);
+
+  context.save();
+
+  for (const key of blockedCells) {
+    const [column, row] = key.split(',').map(Number);
+    const x = (column - 0.5) * cellWidth;
+    const y = (row - 0.5) * cellHeight;
+    const width = cellWidth * (0.95 + seededFloat(seed + column * 97 + row * 13) * 0.8);
+    const height = cellHeight * (0.55 + seededFloat(seed + column * 19 + row * 83) * 0.65);
+
+    context.globalAlpha = tilted ? 0.24 : 0.12;
+    context.fillStyle = '#050608';
+    context.beginPath();
+    context.ellipse(x + width * 0.16, y + shadowOffset, width * 0.62, height * 0.42, 0, 0, Math.PI * 2);
+    context.fill();
+
+    context.globalAlpha = 0.52;
+    context.fillStyle = mixHexColors(biome.blocked, biome.accent, 0.22);
+    context.beginPath();
+    context.ellipse(x, y - shadowOffset * 0.14, width * 0.42, height * 0.48, 0, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  for (const cell of highCells) {
+    const x = (cell.column - 0.5) * cellWidth;
+    const y = (cell.row - 0.5) * cellHeight;
+    const radius = Math.max(cellWidth, cellHeight) * (0.8 + cell.level * 0.12);
+
+    context.globalAlpha = tilted ? 0.16 : 0.08;
+    context.fillStyle = cell.level >= 5 ? '#f4f4f5' : biome.accent;
+    context.beginPath();
+    context.ellipse(x - radius * 0.14, y - radius * 0.18, radius * 0.54, radius * 0.26, -0.45, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.restore();
+  context.globalAlpha = 1;
 }
 
 function addTerrainTexture(context, canvas, seed, biome) {
@@ -1275,6 +1360,14 @@ function hexToRgb(color) {
     r: parseInt(normalized.slice(0, 2), 16),
     g: parseInt(normalized.slice(2, 4), 16),
     b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function scaleRgb(color, amount) {
+  return {
+    r: clamp(Math.round(color.r * amount), 0, 255),
+    g: clamp(Math.round(color.g * amount), 0, 255),
+    b: clamp(Math.round(color.b * amount), 0, 255),
   };
 }
 
