@@ -50,6 +50,8 @@ const CELL_LEVEL_SCALES = {
 const MIN_CAMERA_ZOOM = 0.8;
 const MAX_CAMERA_ZOOM = 1.2;
 const ZOOM_STEP = 0.2;
+const MOVEMENT_SEND_INTERVAL_MS = 50;
+const MAX_MOVEMENT_ELAPSED_MS = 120;
 const DEFAULT_WORLD = {
   width: 32000,
   height: 32000,
@@ -111,6 +113,7 @@ let socket = null;
 let heartbeatId = null;
 let reconnectId = null;
 let reconnectAttempts = 0;
+let lastMovementSentAt = 0;
 const activeTouchPointers = new Map();
 let pinchGesture = null;
 
@@ -131,9 +134,10 @@ function connectSocket() {
   socket.addEventListener('open', () => {
     reconnectAttempts = 0;
     lastSentDirection = { dx: 0, dy: 0 };
+    lastMovementSentAt = 0;
     setConnectionStatus('Online', false);
     startHeartbeat();
-    sendMovementIntent();
+    sendMovementIntent(true);
     console.log('Connected to game server.');
   });
 
@@ -259,6 +263,7 @@ window.addEventListener('keydown', (event) => {
   if (isMovementKey(event.key)) {
     clickMoveTarget = null;
     pressedKeys.add(event.key.toLowerCase());
+    sendMovementIntent(true);
     event.preventDefault();
   }
 });
@@ -281,13 +286,14 @@ canvas.addEventListener('pointerdown', (event) => {
 
   event.preventDefault();
   canvas.setPointerCapture?.(event.pointerId);
+  clickMoveTarget = null;
 
   if (event.pointerType === 'touch') {
     activeTouchPointers.set(event.pointerId, getCanvasPoint(event));
 
     if (activeTouchPointers.size >= 2) {
       startPinchGesture();
-      clickMoveTarget = null;
+      sendMovementIntent(true);
       return;
     }
   }
@@ -295,7 +301,8 @@ canvas.addEventListener('pointerdown', (event) => {
   const cell = getClickedCell(event);
 
   if (!cell || isBlockedClickTarget(cell)) {
-    clickMoveTarget = null;
+    pressedKeys.clear();
+    sendMovementIntent(true);
     return;
   }
 
@@ -305,6 +312,7 @@ canvas.addEventListener('pointerdown', (event) => {
     column: cell.column,
     row: cell.row,
   };
+  sendMovementIntent(true);
 });
 
 canvas.addEventListener('pointermove', (event) => {
@@ -350,8 +358,12 @@ function getMovementDirection() {
 function getClickMoveDirection() {
   const player = getLocalPlayer();
 
-  if (!player || !clickMoveTarget || clickMoveTarget.mapId !== world.mapId) {
+  if (!clickMoveTarget || clickMoveTarget.mapId !== world.mapId) {
     clickMoveTarget = null;
+    return { dx: 0, dy: 0 };
+  }
+
+  if (!player) {
     return { dx: 0, dy: 0 };
   }
 
@@ -368,16 +380,26 @@ function getClickMoveDirection() {
   };
 }
 
-function sendMovementIntent() {
+function sendMovementIntent(force = false) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return;
   }
 
+  const now = performance.now();
   const { dx, dy } = getMovementDirection();
+  const changedDirection = dx !== lastSentDirection.dx || dy !== lastSentDirection.dy;
 
-  if (dx !== 0 || dy !== 0 || dx !== lastSentDirection.dx || dy !== lastSentDirection.dy) {
-    sendSocketMessage({ type: 'move', dx, dy });
+  if (!force && !changedDirection && now - lastMovementSentAt < MOVEMENT_SEND_INTERVAL_MS) {
+    return;
+  }
+
+  if (force || dx !== 0 || dy !== 0 || changedDirection) {
+    const elapsedMs = lastMovementSentAt > 0
+      ? clamp(now - lastMovementSentAt, 0, MAX_MOVEMENT_ELAPSED_MS)
+      : MOVEMENT_SEND_INTERVAL_MS;
+    sendSocketMessage({ type: 'move', dx, dy, elapsedMs });
     lastSentDirection = { dx, dy };
+    lastMovementSentAt = now;
   }
 }
 

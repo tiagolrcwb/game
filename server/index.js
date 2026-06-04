@@ -10,10 +10,12 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8080;
 const PLAYER_SIZE = 24;
+const MOVEMENT_FRAME_MS = 1000 / 60;
+const MAX_MOVEMENT_FRAMES = 4;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 48 * 1024 * 1024;
-const APP_VERSION = '2026-06-04-terrain-generator-2';
+const APP_VERSION = '2026-06-04-point-click-speed-1';
 const SPEED_LEVEL_MULTIPLIERS = {
   1: 0.5,
   2: 0.75,
@@ -679,6 +681,7 @@ async function readMapData(map) {
   }
 
   data = normalizeMapData(data, map);
+  hydrateRuntimeMapData(data);
   mapDataCache.set(map.id, data);
   return data;
 }
@@ -689,8 +692,31 @@ async function writeMapData(map, data) {
   const filePath = getMapDataFilePath(map.id);
 
   fs.writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`);
+  hydrateRuntimeMapData(normalized);
   mapDataCache.set(map.id, normalized);
   await db.execute('UPDATE maps SET map_data_path = ? WHERE id = ?', [getMapDataPublicPath(map.id), map.id]);
+}
+
+function hydrateRuntimeMapData(data) {
+  const blockedCellSet = new Set(data.blockedCells || []);
+  const speedCellMap = new Map();
+
+  for (const cell of data.speedCells || []) {
+    speedCellMap.set(getCellKey(cell.column, cell.row), cell);
+  }
+
+  Object.defineProperties(data, {
+    blockedCellSet: {
+      value: blockedCellSet,
+      enumerable: false,
+      configurable: true,
+    },
+    speedCellMap: {
+      value: speedCellMap,
+      enumerable: false,
+      configurable: true,
+    },
+  });
 }
 
 function normalizeMapData(data, map) {
@@ -1591,11 +1617,12 @@ function createGameConfigPayload(map, mapData = createDefaultMapData(map)) {
   };
 }
 
-async function handleMove(player, dx, dy) {
+async function handleMove(player, dx, dy, elapsedMs = MOVEMENT_FRAME_MS) {
   const map = getMapForPlayer(player);
   const mapData = await readMapData(map);
   const normalizedDx = Math.sign(Number(dx) || 0);
   const normalizedDy = Math.sign(Number(dy) || 0);
+  const movementFrames = clamp((Number(elapsedMs) || MOVEMENT_FRAME_MS) / MOVEMENT_FRAME_MS, 0.5, MAX_MOVEMENT_FRAMES);
 
   player.isMoving = normalizedDx !== 0 || normalizedDy !== 0;
 
@@ -1603,13 +1630,17 @@ async function handleMove(player, dx, dy) {
     player.direction = getPlayerDirection(normalizedDx, normalizedDy);
   }
 
-  const movementSpeed = getMovementSpeedForPlayer(player, map, mapData);
-  const nextX = player.x + normalizedDx * movementSpeed;
-  const nextY = player.y + normalizedDy * movementSpeed;
+  const movementSteps = Math.max(1, Math.ceil(movementFrames));
 
-  if (!isBlockedPosition(nextX, nextY, map, mapData)) {
-    player.x = nextX;
-    player.y = nextY;
+  for (let step = 0; step < movementSteps; step += 1) {
+    const movementSpeed = (getMovementSpeedForPlayer(player, map, mapData) * movementFrames) / movementSteps;
+    const nextX = player.x + normalizedDx * movementSpeed;
+    const nextY = player.y + normalizedDy * movementSpeed;
+
+    if (!isBlockedPosition(nextX, nextY, map, mapData)) {
+      player.x = nextX;
+      player.y = nextY;
+    }
   }
 
   if (tryTeleportAtMapEdge(player, map)) {
@@ -1626,9 +1657,7 @@ async function handleMove(player, dx, dy) {
 
 function getMovementSpeedForPlayer(player, map, mapData) {
   const cell = getCellFromPosition(player.x + PLAYER_SIZE / 2, player.y + PLAYER_SIZE / 2, map);
-  const speedCell = [...(mapData.speedCells || [])]
-    .reverse()
-    .find((item) => item.column === cell.column && item.row === cell.row);
+  const speedCell = mapData.speedCellMap?.get(getCellKey(cell.column, cell.row));
   const multiplier = speedCell ? Number(speedCell.multiplier || 1) : 1;
 
   return clamp(Number(map.movementSpeed || 5) * multiplier, 0.5, 40);
@@ -1662,7 +1691,7 @@ function tryTeleportAtMapEdge(player, map) {
 }
 
 function isBlockedPosition(x, y, map, mapData) {
-  const blocked = new Set(mapData.blockedCells);
+  const blocked = mapData.blockedCellSet || new Set(mapData.blockedCells);
   const probeCells = [
     getCellFromPosition(x + PLAYER_SIZE / 2, y + PLAYER_SIZE / 2, map),
     getCellFromPosition(x + 3, y + 3, map),
@@ -1785,7 +1814,7 @@ wss.on('connection', (socket, request) => {
       socket.isAlive = true;
 
       if (message.type === 'move') {
-        await handleMove(player, message.dx, message.dy);
+        await handleMove(player, message.dx, message.dy, message.elapsedMs);
         await broadcastGameState();
         return;
       }
