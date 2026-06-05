@@ -23,6 +23,7 @@ const editorZoomInButton = document.querySelector('[data-editor-zoom-in]');
 const editorZoomOutButton = document.querySelector('[data-editor-zoom-out]');
 const editorBackgroundInput = document.querySelector('[data-editor-background]');
 const cellParamLevelSelect = document.querySelector('[data-cell-param-level]');
+const terrainBrushSelect = document.querySelector('[data-terrain-brush]');
 const backgroundPreview = document.querySelector('[data-background-preview]');
 const raceSpritePackageInput = document.querySelector('[data-race-sprite-package]');
 const teleportForm = document.querySelector('[data-teleport-form]');
@@ -47,6 +48,15 @@ const SPEED_LEVEL_MULTIPLIERS = {
   3: 1,
   4: 1.25,
   5: 1.5,
+};
+const TERRAIN_TYPES = {
+  grass: { label: 'Grama', color: '#3f7a3a', accent: '#5ea04c' },
+  brush: { label: 'Mato', color: '#245437', accent: '#3f7049' },
+  rock: { label: 'Rocha', color: '#65666c', accent: '#85868c' },
+  water: { label: 'Agua', color: '#276f8f', accent: '#3aa4c2' },
+  sand: { label: 'Areia', color: '#b99a5d', accent: '#d4ba79' },
+  dirt: { label: 'Terra', color: '#7a5135', accent: '#9a6b48' },
+  path: { label: 'Caminho', color: '#8b7653', accent: '#b0996b' },
 };
 const TERRAIN_BIOMES = {
   forest: {
@@ -146,6 +156,8 @@ if (managerToken) {
   unlock();
   loadManagerData();
 }
+
+renderTerrainBrushOptions();
 
 tokenForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -1459,7 +1471,7 @@ function continueEditorDrag(event) {
     return;
   }
 
-  if (['collision', 'teleport', 'speed', 'level', 'erase'].includes(editor.mode)) {
+  if (['terrain', 'collision', 'teleport', 'speed', 'level', 'erase'].includes(editor.mode)) {
     const cell = eventToCell(event);
     if (cell) {
       paintEditorCell(cell);
@@ -1507,6 +1519,11 @@ function paintEditorCell(cell) {
 
     syncBlockedCellsArray();
     renderEditor();
+    return;
+  }
+
+  if (editor.mode === 'terrain') {
+    applyTerrainCell(cell);
     return;
   }
 
@@ -1725,7 +1742,9 @@ function eraseCellParameters(cell) {
   ensureEditorDataCollections();
   const key = getCellKey(cell.column, cell.row);
   editor.data.blockedCellSet.delete(key);
+  editor.data.terrainCellMap.delete(key);
   syncBlockedCellsArray();
+  syncTerrainCellsArray();
   editor.data.teleportPoints = editor.data.teleportPoints.filter((point) => (
     point.column !== cell.column || point.row !== cell.row
   ));
@@ -1740,6 +1759,27 @@ function eraseCellParameters(cell) {
   setStatus('Parametros da celula apagados.');
 }
 
+function applyTerrainCell(cell) {
+  ensureEditorDataCollections();
+  const type = getSelectedTerrainType();
+  const key = getCellKey(cell.column, cell.row);
+
+  editor.data.terrainCellMap.set(key, {
+    id: cryptoRandomId(),
+    column: cell.column,
+    row: cell.row,
+    type,
+  });
+  syncTerrainCellsArray();
+  renderEditor();
+  setStatus(`${TERRAIN_TYPES[type].label} aplicado na celula.`);
+}
+
+function getSelectedTerrainType() {
+  const type = terrainBrushSelect.value;
+  return TERRAIN_TYPES[type] ? type : 'grass';
+}
+
 function getSelectedCellParamLevel() {
   return clamp(Number(cellParamLevelSelect.value || 3), 1, 5);
 }
@@ -1748,6 +1788,10 @@ function ensureEditorDataCollections() {
   const data = editor.data || createEmptyMapData();
   data.blockedCells = Array.isArray(data.blockedCells) ? data.blockedCells : [];
   data.blockedCellSet = data.blockedCellSet instanceof Set ? data.blockedCellSet : new Set(data.blockedCells);
+  data.terrainCells = normalizeTerrainCells(data);
+  data.terrainCellMap = data.terrainCellMap instanceof Map
+    ? data.terrainCellMap
+    : new Map(data.terrainCells.map((cell) => [getCellKey(cell.column, cell.row), cell]));
   data.teleportPoints = Array.isArray(data.teleportPoints) ? data.teleportPoints : [];
   data.speedCells = Array.isArray(data.speedCells) ? data.speedCells : [];
   data.levelCells = Array.isArray(data.levelCells) ? data.levelCells : [];
@@ -1773,6 +1817,7 @@ function renderEditor() {
     editorContext.drawImage(editor.backgroundImage, 0, 0, getMapPixelWidth(editor.map), getMapPixelHeight(editor.map));
   }
 
+  renderEditorTerrainCells();
   renderEditorCollisions();
   renderEditorSpeedCells();
   renderEditorLevelCells();
@@ -1783,6 +1828,26 @@ function renderEditor() {
   renderEditorCellBadges();
   editorContext.restore();
   renderEditorHud();
+}
+
+function renderEditorTerrainCells() {
+  for (const cell of editor.data.terrainCells) {
+    if (!isCellVisible(cell.column, cell.row)) {
+      continue;
+    }
+
+    const terrain = TERRAIN_TYPES[cell.type] || TERRAIN_TYPES.grass;
+    const x = (cell.column - 1) * editor.map.cellSize;
+    const y = (cell.row - 1) * editor.map.cellSize;
+    const inset = Math.max(1 / editor.zoom, 0.5);
+
+    editorContext.fillStyle = terrain.color;
+    editorContext.fillRect(x, y, editor.map.cellSize, editor.map.cellSize);
+    editorContext.fillStyle = terrain.accent;
+    editorContext.globalAlpha = 0.24;
+    editorContext.fillRect(x + inset, y + inset, editor.map.cellSize - inset * 2, editor.map.cellSize - inset * 2);
+    editorContext.globalAlpha = 1;
+  }
 }
 
 function renderEditorGrid() {
@@ -2059,6 +2124,7 @@ function isCellVisible(column, row) {
 
 function normalizeClientMapData(data, map = null) {
   const blockedCells = Array.isArray(data?.blockedCells) ? data.blockedCells : [];
+  const terrainCells = normalizeTerrainCells(data);
 
   return {
     version: 1,
@@ -2066,10 +2132,36 @@ function normalizeClientMapData(data, map = null) {
     heightCells: Number(data?.heightCells) || 0,
     blockedCells,
     blockedCellSet: new Set(blockedCells),
+    terrainCells,
+    terrainCellMap: new Map(terrainCells.map((cell) => [getCellKey(cell.column, cell.row), cell])),
     teleportPoints: Array.isArray(data?.teleportPoints) ? data.teleportPoints : [],
     speedCells: normalizeSpeedCells(data),
     levelCells: normalizeLevelCells(data),
   };
+}
+
+function normalizeTerrainCells(data) {
+  const cells = Array.isArray(data?.terrainCells) ? data.terrainCells : [];
+  const byCell = new Map();
+
+  for (const cell of cells) {
+    const column = Number(cell?.column);
+    const row = Number(cell?.row);
+    const type = String(cell?.type || '');
+
+    if (!Number.isInteger(column) || !Number.isInteger(row) || !TERRAIN_TYPES[type]) {
+      continue;
+    }
+
+    byCell.set(getCellKey(column, row), {
+      id: String(cell?.id || cryptoRandomId()),
+      column,
+      row,
+      type,
+    });
+  }
+
+  return [...byCell.values()].sort(compareCells);
 }
 
 function normalizeSpeedCells(data) {
@@ -2155,6 +2247,21 @@ function createEmptyMapData() {
 
 function syncBlockedCellsArray() {
   editor.data.blockedCells = [...editor.data.blockedCellSet].sort(compareCellKeys);
+}
+
+function syncTerrainCellsArray() {
+  editor.data.terrainCells = [...editor.data.terrainCellMap.values()].sort(compareCells);
+}
+
+function renderTerrainBrushOptions() {
+  terrainBrushSelect.innerHTML = '';
+
+  for (const [type, terrain] of Object.entries(TERRAIN_TYPES)) {
+    const option = document.createElement('option');
+    option.value = type;
+    option.textContent = terrain.label;
+    terrainBrushSelect.append(option);
+  }
 }
 
 function compareCellKeys(a, b) {

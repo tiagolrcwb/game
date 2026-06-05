@@ -15,7 +15,7 @@ const MAX_MOVEMENT_FRAMES = 4;
 const SOCKET_HEARTBEAT_INTERVAL = 25000;
 const PLAYER_DISCONNECT_GRACE_MS = 30000;
 const MAX_REQUEST_BODY_SIZE = 48 * 1024 * 1024;
-const APP_VERSION = '2026-06-04-point-click-speed-1';
+const APP_VERSION = '2026-06-05-terrain-paint-1';
 const SPEED_LEVEL_MULTIPLIERS = {
   1: 0.5,
   2: 0.75,
@@ -23,6 +23,7 @@ const SPEED_LEVEL_MULTIPLIERS = {
   4: 1.25,
   5: 1.5,
 };
+const TERRAIN_TYPES = new Set(['grass', 'brush', 'rock', 'water', 'sand', 'dirt', 'path']);
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client');
 const MIGRATIONS_DIR = path.resolve(__dirname, '..', 'database', 'migrations');
 const MAP_ASSETS_DIR = path.join(CLIENT_DIR, 'assets', 'maps');
@@ -656,6 +657,7 @@ function createDefaultMapData(map) {
     widthCells: map.widthCells,
     heightCells: map.heightCells,
     blockedCells: [],
+    terrainCells: [],
     teleportPoints: [],
     speedCells: [],
     levelCells: [],
@@ -726,6 +728,7 @@ function normalizeMapData(data, map) {
   const teleportPoints = Array.isArray(data.teleportPoints)
     ? data.teleportPoints.map((point) => normalizeTeleportPoint(point, map)).filter(Boolean)
     : [];
+  const terrainCells = normalizeTerrainCells(data, map);
   const speedCells = normalizeSpeedCells(data, map);
   const levelCells = normalizeLevelCells(data, map);
 
@@ -734,9 +737,45 @@ function normalizeMapData(data, map) {
     widthCells: map.widthCells,
     heightCells: map.heightCells,
     blockedCells,
+    terrainCells,
     teleportPoints,
     speedCells,
     levelCells,
+  };
+}
+
+function normalizeTerrainCells(data, map) {
+  const cells = Array.isArray(data.terrainCells)
+    ? data.terrainCells.map((cell) => normalizeTerrainCell(cell, map)).filter(Boolean)
+    : [];
+  const byCell = new Map();
+
+  for (const cell of cells) {
+    byCell.set(getCellKey(cell.column, cell.row), cell);
+  }
+
+  return [...byCell.values()].sort(compareCells);
+}
+
+function normalizeTerrainCell(cell, map) {
+  const column = Number(cell?.column);
+  const row = Number(cell?.row);
+  const type = String(cell?.type || '');
+
+  if (
+    !Number.isInteger(column) ||
+    !Number.isInteger(row) ||
+    !TERRAIN_TYPES.has(type) ||
+    !isCellKeyInsideMap(`${column},${row}`, map)
+  ) {
+    return null;
+  }
+
+  return {
+    id: String(cell.id || crypto.randomUUID()),
+    column,
+    row,
+    type,
   };
 }
 
@@ -870,6 +909,10 @@ function normalizeCellKey(value) {
 function isCellKeyInsideMap(cellKey, map) {
   const [column, row] = cellKey.split(',').map(Number);
   return column >= 1 && column <= map.widthCells && row >= 1 && row <= map.heightCells;
+}
+
+function compareCells(a, b) {
+  return a.row - b.row || a.column - b.column;
 }
 
 function normalizeTeleportPoint(point, map) {
@@ -1610,6 +1653,7 @@ function createGameConfigPayload(map, mapData = createDefaultMapData(map)) {
       mapName: map.name,
       exits: map.exits,
       blockedCells: mapData.blockedCells,
+      terrainCells: mapData.terrainCells,
       teleportPoints: mapData.teleportPoints,
       speedCells: mapData.speedCells,
       levelCells: mapData.levelCells,

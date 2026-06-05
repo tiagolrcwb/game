@@ -511,6 +511,10 @@
         font-weight: 650;
       }
 
+      .terrain-select {
+        min-width: 160px;
+      }
+
       .map-editor-canvas {
         width: 100%;
         height: min(62vh, 680px);
@@ -863,6 +867,7 @@
                           <select data-editor-map></select>
                         </label>
                         <div class="segmented" role="group" aria-label="Modo do editor">
+                          <button type="button" data-editor-mode="terrain">Terreno</button>
                           <button class="active" type="button" data-editor-mode="collision">Colisao</button>
                           <button type="button" data-editor-mode="teleport">Teleporte</button>
                           <button type="button" data-editor-mode="speed">Velocidade</button>
@@ -879,6 +884,10 @@
                             <option value="4">4</option>
                             <option value="5">5</option>
                           </select>
+                        </label>
+                        <label>
+                          Terreno
+                          <select class="terrain-select" data-terrain-brush></select>
                         </label>
                         <div class="editor-actions">
                           <button type="button" data-editor-zoom-out>-</button>
@@ -1042,6 +1051,6 @@
       </div>
     </section>
 
-    <script src="manager.js?v=2026-06-04-terrain-generator-2"></script>
+    <script src="manager.js?v=2026-06-05-terrain-paint-1"></script>
   </body>
 </html>

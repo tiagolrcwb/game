@@ -47,6 +47,15 @@ const CELL_LEVEL_SCALES = {
   4: 1.1,
   5: 1.2,
 };
+const TERRAIN_TYPES = {
+  grass: { color: '#3f7a3a', accent: '#5ea04c' },
+  brush: { color: '#245437', accent: '#3f7049' },
+  rock: { color: '#65666c', accent: '#85868c' },
+  water: { color: '#276f8f', accent: '#3aa4c2' },
+  sand: { color: '#b99a5d', accent: '#d4ba79' },
+  dirt: { color: '#7a5135', accent: '#9a6b48' },
+  path: { color: '#8b7653', accent: '#b0996b' },
+};
 const MIN_CAMERA_ZOOM = 0.8;
 const MAX_CAMERA_ZOOM = 1.2;
 const ZOOM_STEP = 0.2;
@@ -64,6 +73,7 @@ const DEFAULT_WORLD = {
   backgroundImagePath: null,
   mapDataPath: '/assets/maps/data/map-1.json',
   blockedCells: [],
+  terrainCells: [],
   teleportPoints: [],
   speedCells: [],
   levelCells: [],
@@ -182,6 +192,7 @@ function applyStateMessage(message) {
       characterSize: Number(message.world.characterSize) || DEFAULT_WORLD.characterSize,
       movementSpeed: Number(message.world.movementSpeed) || DEFAULT_WORLD.movementSpeed,
       blockedCells: Array.isArray(message.world.blockedCells) ? message.world.blockedCells : [],
+      terrainCells: Array.isArray(message.world.terrainCells) ? message.world.terrainCells : [],
       teleportPoints: Array.isArray(message.world.teleportPoints) ? message.world.teleportPoints : [],
       speedCells: Array.isArray(message.world.speedCells) ? message.world.speedCells : [],
       levelCells: Array.isArray(message.world.levelCells) ? message.world.levelCells : [],
@@ -582,6 +593,8 @@ function renderBackground() {
   const firstGridY = Math.floor(camera.y / world.cellSize) * world.cellSize;
   const lastGridY = Math.min(world.height, camera.y + viewportHeight + world.cellSize);
 
+  renderTerrainCells(firstGridX, lastGridX, firstGridY, lastGridY);
+
   if (world.showGrid) {
     context.strokeStyle = world.gridColor;
     context.lineWidth = 1;
@@ -616,6 +629,40 @@ function renderBackground() {
   context.scale(cameraZoom, cameraZoom);
   renderClickMoveTarget();
   context.restore();
+}
+
+function renderTerrainCells(firstGridX, lastGridX, firstGridY, lastGridY) {
+  if (!world.terrainCells.length) {
+    return;
+  }
+
+  const firstColumn = Math.max(1, Math.floor(firstGridX / world.cellSize) + 1);
+  const lastColumn = Math.min(world.widthCells, Math.ceil(lastGridX / world.cellSize));
+  const firstRow = Math.max(1, Math.floor(firstGridY / world.cellSize) + 1);
+  const lastRow = Math.min(world.heightCells, Math.ceil(lastGridY / world.cellSize));
+
+  for (const cell of world.terrainCells) {
+    if (
+      cell.column < firstColumn ||
+      cell.column > lastColumn ||
+      cell.row < firstRow ||
+      cell.row > lastRow
+    ) {
+      continue;
+    }
+
+    const terrain = TERRAIN_TYPES[cell.type] || TERRAIN_TYPES.grass;
+    const x = (cell.column - 1) * world.cellSize;
+    const y = (cell.row - 1) * world.cellSize;
+    const inset = Math.max(1, Math.floor(world.cellSize * 0.08));
+
+    context.fillStyle = terrain.color;
+    context.fillRect(x, y, world.cellSize, world.cellSize);
+    context.fillStyle = terrain.accent;
+    context.globalAlpha = 0.22;
+    context.fillRect(x + inset, y + inset, world.cellSize - inset * 2, world.cellSize - inset * 2);
+    context.globalAlpha = 1;
+  }
 }
 
 function preloadBackgroundImage(source) {
